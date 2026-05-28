@@ -1,0 +1,7 @@
+bin/
+.env.local
+*.db
+*.sqlite
+.DS_Store
+.idea/
+.vscode/

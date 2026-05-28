@@ -1,0 +1,23 @@
+# Прод-конфиг — рассчитан на единый /opt/traefik/docker-compose.yml на сервере,
+# где уже крутится MariaDB-контейнер и Traefik. Здесь — только наш сервис.
+#
+# Для деплоя используется make deploy: rsync + docker build + docker compose up
+# в /opt/traefik. Этот файл — для справки и для запуска через docker-compose,
+# если кто-то захочет поднять стек tbd-finforme отдельно.
+
+services:
+  app:
+    build: .
+    image: tobedone:latest
+    environment:
+      - PORT=8080
+      - DATABASE_DSN=${DATABASE_DSN}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - SECURE_COOKIE=true
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.tobedone.rule=Host(`tbd.finfor.me`)"
+      - "traefik.http.routers.tobedone.entrypoints=websecure"
+      - "traefik.http.routers.tobedone.tls.certresolver=le"
+      - "traefik.http.services.tobedone.loadbalancer.server.port=8080"

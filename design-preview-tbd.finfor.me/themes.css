@@ -1,0 +1,153 @@
+/* ============================================
+   tobedone — themes
+   Direction A · Paper Bento (warm cream)
+   Direction B · Bold Blocks (color tiles, chunky)
+   Direction C · Sticky Notes (collage, tactile)
+   ============================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+:root {
+  --font-head: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'Space Mono', 'JetBrains Mono', monospace;
+}
+
+* { box-sizing: border-box; }
+
+/* ---------- PAPER (Direction A) ---------- */
+.theme-paper {
+  --bg: #f4ecdc;
+  --bg-2: #ece2cd;
+  --surface: #fffaf0;
+  --surface-2: #fbf3df;
+  --ink: #2a241d;
+  --ink-soft: #6f6253;
+  --ink-faint: #a89a85;
+  --border: rgba(60, 40, 20, 0.10);
+  --border-strong: rgba(60, 40, 20, 0.22);
+  --accent-terra: #d97757;
+  --accent-indigo: #4f5fb3;
+  --accent-olive: #7d8b3f;
+  --accent-mustard: #c89a3c;
+  --accent-rose: #c75d72;
+  --accent-clay: #a85b3c;
+  --shadow-sm: 0 1px 0 rgba(60,40,20,0.06), 0 2px 4px rgba(60,40,20,0.04);
+  --shadow-md: 0 1px 0 rgba(60,40,20,0.06), 0 8px 18px -8px rgba(60,40,20,0.18);
+  --shadow-lg: 0 1px 0 rgba(60,40,20,0.06), 0 18px 36px -16px rgba(60,40,20,0.22);
+  --radius-tile: 14px;
+  --radius-button: 10px;
+  --tile-border: 1px solid var(--border);
+}
+.theme-paper.dark {
+  --bg: #221d17;
+  --bg-2: #1a1612;
+  --surface: #2c2620;
+  --surface-2: #251f1a;
+  --ink: #f1e8d6;
+  --ink-soft: #b6a892;
+  --ink-faint: #6e6354;
+  --border: rgba(255, 230, 200, 0.10);
+  --border-strong: rgba(255, 230, 200, 0.22);
+}
+
+/* ---------- BLOCKS (Direction B) ---------- */
+.theme-blocks {
+  --bg: #ede4d0;
+  --bg-2: #e1d6bd;
+  --surface: #fffaf0;
+  --surface-2: #fff5e2;
+  --ink: #1f1a14;
+  --ink-soft: #5a4f3e;
+  --ink-faint: #98886f;
+  --border: #1f1a14;
+  --border-strong: #1f1a14;
+  --accent-terra: #e4815e;
+  --accent-indigo: #5a6bc2;
+  --accent-olive: #8b9847;
+  --accent-mustard: #d6a23d;
+  --accent-rose: #d76a82;
+  --accent-clay: #b46340;
+  --shadow-sm: 3px 3px 0 #1f1a14;
+  --shadow-md: 5px 5px 0 #1f1a14;
+  --shadow-lg: 7px 7px 0 #1f1a14;
+  --radius-tile: 10px;
+  --radius-button: 6px;
+  --tile-border: 2px solid #1f1a14;
+}
+.theme-blocks.dark {
+  --bg: #1c1812;
+  --bg-2: #15110c;
+  --surface: #2a241c;
+  --surface-2: #221d17;
+  --ink: #fff5e2;
+  --ink-soft: #c0b395;
+  --ink-faint: #786c57;
+  --border: #fff5e2;
+  --border-strong: #fff5e2;
+  --shadow-sm: 3px 3px 0 #fff5e2;
+  --shadow-md: 5px 5px 0 #fff5e2;
+  --shadow-lg: 7px 7px 0 #fff5e2;
+  --tile-border: 2px solid #fff5e2;
+}
+
+/* ---------- COLLAGE (Direction C) ---------- */
+.theme-collage {
+  --bg: #e8dfc8;
+  --bg-2: #d9cdaf;
+  --surface: #fef9ea;
+  --surface-2: #f7eccf;
+  --ink: #28221a;
+  --ink-soft: #6b5e4a;
+  --ink-faint: #a39479;
+  --border: rgba(40, 30, 15, 0.08);
+  --border-strong: rgba(40, 30, 15, 0.18);
+  --accent-terra: #d76a48;
+  --accent-indigo: #515faa;
+  --accent-olive: #7a8a3a;
+  --accent-mustard: #c79234;
+  --accent-rose: #c75d72;
+  --accent-clay: #a45838;
+  --shadow-sm: 0 2px 0 rgba(40,30,15,0.05), 0 4px 10px rgba(40,30,15,0.08);
+  --shadow-md: 0 3px 0 rgba(40,30,15,0.06), 0 12px 22px -8px rgba(40,30,15,0.22);
+  --shadow-lg: 0 4px 0 rgba(40,30,15,0.06), 0 22px 38px -14px rgba(40,30,15,0.30);
+  --radius-tile: 4px;
+  --radius-button: 8px;
+  --tile-border: 1px solid var(--border);
+}
+.theme-collage.dark {
+  --bg: #1f1b13;
+  --bg-2: #161208;
+  --surface: #2e2820;
+  --surface-2: #28221b;
+  --ink: #f4ecd2;
+  --ink-soft: #b6a98a;
+  --ink-faint: #6e624e;
+  --border: rgba(244, 236, 210, 0.10);
+}
+
+/* ---------- Paper texture (used by all themes via opacity) ---------- */
+.paper-texture {
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 300 300' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.85' numOctaves='2' seed='4' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.15 0 0 0 0 0.10 0 0 0 0 0.05 0 0 0 0.50 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.10;
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  z-index: 0;
+}
+.theme-paper .paper-texture { opacity: 0.14; }
+.theme-collage .paper-texture { opacity: 0.18; }
+.theme-blocks .paper-texture { opacity: 0.06; }
+.dark .paper-texture { mix-blend-mode: screen; opacity: 0.06; }
+
+/* ---------- Resets for everything ---------- */
+body {
+  margin: 0;
+  font-family: var(--font-head);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button { font-family: inherit; cursor: pointer; }
+input, textarea { font-family: inherit; }

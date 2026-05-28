@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+.vscode
+bin
+*.db
+*.sqlite
+.env.local
+.DS_Store
+design-preview-tbd.finfor.me
+README.md

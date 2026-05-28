@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="color-scheme" content="light dark"/>
+  <title>{{.Title}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"/>
+  <link rel="stylesheet" href="/static/theme-paper.css"/>
+  <link rel="stylesheet" href="/static/app.css"/>
+  <script>
+    (function(){ try { if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark'); } catch(e){} })();
+  </script>
+</head>
+<body class="theme-paper" data-user-name="{{.User.DisplayName}}">
+  <div class="paper-texture"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">tbd</span>
+      <span class="brand-text">tobedone</span>
+    </div>
+
+    <div class="topbar-spacer"></div>
+
+    <div class="search" role="search">
+      <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="7" cy="7" r="5"/><path d="M11 11l4 4"/></svg>
+      <input id="search" placeholder="Найти задачу…" autocomplete="off"/>
+    </div>
+
+    <button id="sync-btn" class="sync" type="button" title="Состояние синка" aria-live="polite">
+      <span class="sync-bubble" data-state="synced">
+        <span class="sync-icon" id="sync-icon"></span>
+        <span class="sync-pulse" hidden></span>
+      </span>
+      <span class="sync-label" id="sync-label">Синхронизировано</span>
+    </button>
+
+    <button id="theme-btn" class="iconbtn" type="button" title="Тема">
+      <svg id="icon-moon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M13.5 9.5A5.5 5.5 0 1 1 6.5 2.5a4 4 0 0 0 7 7z"/></svg>
+      <svg id="icon-sun" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" hidden><circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M11.54 4.46l1.41-1.41M3.05 12.95l1.41-1.41"/></svg>
+    </button>
+
+    <button id="new-task-btn" class="btn btn-primary" type="button">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M8 3v10M3 8h10"/></svg>
+      <span class="hide-on-phone">Новая задача</span>
+    </button>
+
+    <button id="user-btn" class="avatar" title="{{.User.DisplayName}}" type="button">
+      {{initials .User.DisplayName}}
+    </button>
+    <div id="user-menu" class="user-menu" hidden>
+      <div class="user-menu-name">{{.User.DisplayName}}</div>
+      <div class="user-menu-email">{{.User.Email}}</div>
+      <div class="user-menu-divider"></div>
+      <button type="button" id="logout-btn" class="user-menu-item">Выйти</button>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <section class="section-header">
+      <div class="section-meta" id="section-meta"></div>
+      <h1 class="section-title">Сегодня</h1>
+    </section>
+
+    <div id="tiles" class="tile-grid"></div>
+
+    <div id="empty" class="empty" hidden>
+      <p>Пока пусто. Время добавить плитку.</p>
+      <button class="btn btn-primary" type="button" id="empty-new-btn">Создать задачу</button>
+    </div>
+  </main>
+
+  <!-- Создание / редактирование -->
+  <div id="modal-overlay" class="modal-overlay" hidden></div>
+  <dialog id="task-modal" class="task-modal">
+    <form id="task-form" method="dialog">
+      <div class="modal-head">
+        <h2 id="modal-title">Новая задача</h2>
+        <button type="button" class="modal-close" id="modal-close" aria-label="Закрыть">✕</button>
+      </div>
+
+      <label class="field">
+        <span>Заголовок</span>
+        <input name="title" id="f-title" required maxlength="500" autocomplete="off"/>
+      </label>
+
+      <label class="field">
+        <span>Заметка</span>
+        <textarea name="note" id="f-note" rows="2" maxlength="2000"></textarea>
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span>Тег</span>
+          <input name="tag" id="f-tag" maxlength="64" placeholder="Работа / Дом / Спорт…" autocomplete="off"/>
+        </label>
+        <label class="field">
+          <span>Дедлайн</span>
+          <input type="datetime-local" name="due_at" id="f-due"/>
+        </label>
+      </div>
+
+      <div class="field">
+        <span>Цвет</span>
+        <div class="swatches" id="f-colors">
+          <button type="button" data-v="terra"   class="sw sw-terra"></button>
+          <button type="button" data-v="indigo"  class="sw sw-indigo"></button>
+          <button type="button" data-v="olive"   class="sw sw-olive"></button>
+          <button type="button" data-v="mustard" class="sw sw-mustard"></button>
+          <button type="button" data-v="rose"    class="sw sw-rose"></button>
+          <button type="button" data-v="clay"    class="sw sw-clay"></button>
+        </div>
+      </div>
+
+      <div class="field">
+        <span>Размер</span>
+        <div class="sizes" id="f-sizes">
+          <button type="button" data-v="s">S</button>
+          <button type="button" data-v="m">M</button>
+          <button type="button" data-v="wide">Wide</button>
+          <button type="button" data-v="l">L</button>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" id="modal-delete" class="btn btn-danger" hidden>Удалить</button>
+        <div style="flex:1"></div>
+        <button type="button" class="btn" id="modal-cancel">Отмена</button>
+        <button type="submit" class="btn btn-primary" id="modal-save">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

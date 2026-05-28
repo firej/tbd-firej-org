@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="color-scheme" content="light dark"/>
+  <title>{{.Title}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"/>
+  <link rel="stylesheet" href="/static/theme-paper.css"/>
+  <link rel="stylesheet" href="/static/app.css"/>
+  <script>
+    (function(){ try { if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark'); } catch(e){} })();
+  </script>
+</head>
+<body class="theme-paper">
+  <div class="paper-texture"></div>
+
+  <main class="auth-shell">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-mark">tbd</span>
+        <span class="brand-text">tobedone</span>
+      </div>
+
+      <h1 class="auth-title">Новый аккаунт</h1>
+      <p class="auth-sub">Чтобы синхронизировать задачи между устройствами</p>
+
+      <form id="auth-form" autocomplete="on">
+        <label class="field">
+          <span>Имя</span>
+          <input type="text" name="display_name" autocomplete="name" placeholder="Как тебя звать?"/>
+        </label>
+        <label class="field">
+          <span>Email</span>
+          <input type="email" name="email" required autocomplete="email" autofocus/>
+        </label>
+        <label class="field">
+          <span>Пароль</span>
+          <input type="password" name="password" required autocomplete="new-password" minlength="6"/>
+        </label>
+        <div class="auth-error" id="auth-error" hidden></div>
+        <button type="submit" class="btn btn-primary btn-block">Создать</button>
+      </form>
+
+      <p class="auth-alt">Уже есть аккаунт? <a href="/login">Войти</a></p>
+    </div>
+  </main>
+
+  <script>
+  document.getElementById('auth-form').addEventListener('submit', async function(e){
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = JSON.stringify({
+      email: fd.get('email'),
+      password: fd.get('password'),
+      display_name: fd.get('display_name') || ''
+    });
+    const errBox = document.getElementById('auth-error');
+    errBox.hidden = true;
+    try {
+      const res = await fetch('/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        errBox.textContent = data.error || 'Не получилось зарегистрироваться';
+        errBox.hidden = false;
+        return;
+      }
+      window.location.href = '/';
+    } catch (err) {
+      errBox.textContent = 'Сеть недоступна';
+      errBox.hidden = false;
+    }
+  });
+  </script>
+</body>
+</html>
