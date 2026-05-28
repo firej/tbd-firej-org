@@ -5,7 +5,7 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
-      - DATABASE_DSN=tobedone:tobedone@tcp(mariadb:3306)/tobedone?parseTime=true&charset=utf8mb4
+      - DATABASE_DSN=tobedone:tobedone@tcp(mariadb:3306)/tobedone?parseTime=true&charset=utf8mb4&loc=UTC
       - SESSION_SECRET=dev-secret-change-me
       - SECURE_COOKIE=false
     depends_on:

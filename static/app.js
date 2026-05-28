@@ -27,9 +27,11 @@
   // ── состояние ─────────────────────────────────────────────
   let tasks = loadCache();
   let pending = loadPending();
-  let editing = null;       // объект задачи в модалке, либо null
+  let editingId = null;     // id задачи, редактируемой в модалке (или null)
   let syncState = 'synced'; // synced | syncing | offline | error
   let syncTimer = null;
+  let dragJustEnded = 0;    // timestamp окончания drag — используем чтобы не открывать модалку по синтетическому click'у Sortable'а
+  let inFlightCreates = 0;  // счётчик незавершённых POST /api/tasks — пока > 0, pullAll не сметает кэш
 
   // ── helpers ───────────────────────────────────────────────
   function uuid() {
@@ -146,6 +148,11 @@
   // ── initial pull ──────────────────────────────────────────
   async function pullAll() {
     if (!navigator.onLine) { setSyncState('offline'); return; }
+    // Не пуллим, пока есть оптимистично созданные задачи (tmp_*) или незавершённые POST'ы —
+    // иначе перетрём то, что ещё не сохранилось на сервере.
+    if (inFlightCreates > 0) return;
+    if (tasks.some(t => typeof t.id === 'string' && t.id.indexOf('tmp_') === 0)) return;
+
     setSyncState('syncing');
     try {
       const data = await api('/api/tasks');
@@ -154,6 +161,7 @@
       localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
       setSyncState('synced');
       renderAll();
+      initSortable();
     } catch (err) {
       console.warn('pull failed', err);
       setSyncState('error');
@@ -341,7 +349,12 @@
       fallbackTolerance: 4,
       delay: 100,           // долгий тап — драг (важно для мобилы, чтобы скролл работал)
       delayOnTouchOnly: true,
+      onStart: function () { dragJustEnded = 0; },
       onEnd: async function (evt) {
+        // Sortable с forceFallback после drop диспатчит синтетический click —
+        // запоминаем момент, чтобы tile-click-обработчик его проигнорировал.
+        dragJustEnded = Date.now();
+
         const id = evt.item.dataset.id;
         const grid = evt.to;
         const children = Array.from(grid.children);
@@ -368,12 +381,21 @@
         t.position = newPos;
         saveCache();
 
-        // Серверный пересчёт — отправляем before/after id'шки
+        // Если перетаскиваем оптимистично созданную задачу (ещё нет серверного id) —
+        // только локальный апдейт; позиция уйдёт на сервер вместе с самой задачей.
+        if (id.indexOf('tmp_') === 0) return;
+
+        // Серверный пересчёт — отправляем before/after id'шки.
+        // Пропускаем якоря, которые сами ещё tmp_ (на сервере их нет).
+        const safeAfter  = (afterId  && afterId.indexOf('tmp_')  !== 0) ? afterId  : null;
+        const safeBefore = (beforeId && beforeId.indexOf('tmp_') !== 0) ? beforeId : null;
+        if (!safeAfter && !safeBefore) return; // нет валидных якорей
+
         try {
           setSyncState('syncing');
           const body = {};
-          if (afterId)  body.before = afterId;  // встаём ПЕРЕД таском с id=afterId
-          if (beforeId) body.after  = beforeId; // и ПОСЛЕ таска с id=beforeId
+          if (safeAfter)  body.before = safeAfter;  // встаём ПЕРЕД таском с id=afterId
+          if (safeBefore) body.after  = safeBefore; // и ПОСЛЕ таска с id=beforeId
           const data = await api('/api/tasks/' + id + '/reorder', {
             method: 'POST', body: JSON.stringify(body),
           });
@@ -386,7 +408,7 @@
         } catch (err) {
           // в очередь — повторим позже
           enqueue({ method: 'POST', path: '/api/tasks/' + id + '/reorder',
-                    body: { before: afterId, after: beforeId } });
+                    body: { before: safeAfter, after: safeBefore } });
           setSyncState(navigator.onLine ? 'error' : 'offline');
         }
       },
@@ -411,6 +433,7 @@
     renderAll();
     initSortable();
 
+    inFlightCreates++;
     try {
       setSyncState('syncing');
       const data = await api('/api/tasks', {
@@ -431,6 +454,8 @@
     } catch (err) {
       // оставляем tmp в кэше и помечаем ошибку (на pending класть нельзя — нет id)
       setSyncState(navigator.onLine ? 'error' : 'offline');
+    } finally {
+      inFlightCreates--;
     }
   }
 
@@ -482,7 +507,7 @@
 
   // ── modal ─────────────────────────────────────────────────
   function openModal(task) {
-    editing = task || null;
+    editingId = task ? task.id : null;
     const modal = document.getElementById('task-modal');
     document.getElementById('modal-overlay').hidden = false;
 
@@ -524,7 +549,7 @@
     if (modal.open) modal.close();
     else modal.removeAttribute('open');
     document.getElementById('modal-overlay').hidden = true;
-    editing = null;
+    editingId = null;
   }
 
   function readModal() {
@@ -599,6 +624,9 @@
 
     // клики по плиткам (делегирование)
     document.getElementById('tiles').addEventListener('click', (e) => {
+      // Игнорируем синтетический click сразу после drag (Sortable forceFallback).
+      if (Date.now() - dragJustEnded < 350) return;
+
       const tile = e.target.closest('.tile');
       if (!tile) return;
       const id = tile.dataset.id;
@@ -643,14 +671,16 @@
       e.preventDefault();
       const data = readModal();
       if (!data.title) { document.getElementById('f-title').focus(); return; }
-      if (editing) patchTask(editing.id, data);
-      else         createTask(data);
+      if (editingId) patchTask(editingId, data);
+      else           createTask(data);
       closeModal();
     });
     document.getElementById('modal-delete').addEventListener('click', () => {
-      if (!editing) return;
-      if (confirm('Удалить «' + editing.title + '»?')) {
-        deleteTask(editing.id);
+      if (!editingId) return;
+      const t = tasks.find(x => x.id === editingId);
+      const title = t ? t.title : 'эту задачу';
+      if (confirm('Удалить «' + title + '»?')) {
+        deleteTask(editingId);
         closeModal();
       }
     });

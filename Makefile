@@ -80,12 +80,12 @@ docker: ## Собрать образ
 	@$(CONTAINER_ENGINE) build -t $(IMAGE_NAME):$(IMAGE_TAG) .
 
 # ── Деплой (по образцу finforme) ──────────────────────────────
-DEPLOY_HOST=firej@finfor.me
+DEPLOY_HOST=firej@firej.org
 DEPLOY_PATH=/opt/tobedone
 
-deploy: ## Задеплоить на сервер firej@finfor.me
+deploy: ## Задеплоить на сервер firej@firej.org
 	@echo "$(GREEN)Синхронизация исходников...$(NC)"
-	@rsync -avz --exclude='.git' --exclude='bin' --exclude='design-preview-tbd.finfor.me' \
+	@rsync -avz --exclude='.git' --exclude='bin' --exclude='design-preview-tbd.firej.org' \
 	             --exclude='*.db' --exclude='.idea' --exclude='.vscode' . $(DEPLOY_HOST):$(DEPLOY_PATH)/
 	@echo "$(GREEN)Сборка образа на сервере...$(NC)"
 	@ssh $(DEPLOY_HOST) 'cd $(DEPLOY_PATH) && docker build -t tobedone:latest .'

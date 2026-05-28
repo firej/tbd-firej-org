@@ -23,7 +23,7 @@ COPY static/    ./static/
 COPY templates/ ./templates/
 
 ENV PORT=8080
-ENV DATABASE_DSN=tobedone:tobedone@tcp(mariadb:3306)/tobedone?parseTime=true&charset=utf8mb4
+ENV DATABASE_DSN=tobedone:tobedone@tcp(mariadb:3306)/tobedone?parseTime=true&charset=utf8mb4&loc=UTC
 ENV SESSION_SECRET=change-me-in-production
 ENV SECURE_COOKIE=false
 

@@ -463,7 +463,7 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2) Собираем серверные изменения с момента since.
-	now := time.Now()
+	now := time.Now().UTC()
 	var rows *sql.Rows
 	var err error
 	if req.Since != nil {

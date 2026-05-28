@@ -13,7 +13,7 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		Port:          getEnv("PORT", "8080"),
-		DatabaseDSN:   getEnv("DATABASE_DSN", "tobedone:tobedone@tcp(localhost:3306)/tobedone?parseTime=true&charset=utf8mb4"),
+		DatabaseDSN:   getEnv("DATABASE_DSN", "tobedone:tobedone@tcp(localhost:3306)/tobedone?parseTime=true&charset=utf8mb4&loc=UTC"),
 		SessionSecret: getEnv("SESSION_SECRET", "change-me-in-production"),
 		SecureCookie:  getEnv("SECURE_COOKIE", "false") == "true",
 	}

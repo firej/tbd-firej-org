@@ -3,7 +3,7 @@
 #
 # Для деплоя используется make deploy: rsync + docker build + docker compose up
 # в /opt/traefik. Этот файл — для справки и для запуска через docker-compose,
-# если кто-то захочет поднять стек tbd-finforme отдельно.
+# если кто-то захочет поднять стек tbd-firej-org отдельно.
 
 services:
   app:
@@ -17,7 +17,7 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.tobedone.rule=Host(`tbd.finfor.me`)"
+      - "traefik.http.routers.tobedone.rule=Host(`tbd.firej.org`)"
       - "traefik.http.routers.tobedone.entrypoints=websecure"
       - "traefik.http.routers.tobedone.tls.certresolver=le"
       - "traefik.http.services.tobedone.loadbalancer.server.port=8080"

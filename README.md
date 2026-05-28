@@ -7,7 +7,7 @@
 - **Стек:** Go 1.25, `gorilla/mux`, `gorilla/sessions`, `bcrypt`, `go-sql-driver/mysql`, `uuid`.
 - **Фронт:** ванильный JS + SortableJS для drag-and-drop. HTML-шаблоны на `html/template`. Никаких сборщиков.
 - **БД:** MariaDB 11. Таблицы: `users`, `tasks` (с JSON-колонкой `sub` и `position DOUBLE`).
-- **Тема:** Paper из прототипа в `design-preview-tbd.finfor.me/` (Direction A). Тёмная — toggle в топбаре.
+- **Тема:** Paper из прототипа в `design-preview-tbd.firej.org/` (Direction A). Тёмная — toggle в топбаре.
 - **Sync:** локальный кэш в `localStorage` + очередь pending-операций. Топбар показывает 4 состояния: `synced` / `syncing` / `offline` / `error`. При возвращении сети — автоматический flush очереди и pull.
 
 ## Структура
@@ -25,7 +25,7 @@
 │   ├── theme-paper.css       — токены и paper-тема из прототипа
 │   ├── app.css               — структурные стили (топбар, грид, плитки, модалка)
 │   └── app.js                — клиентская логика (sync, DnD, CRUD)
-├── design-preview-tbd.finfor.me/  — реф-прототип (не трогать)
+├── design-preview-tbd.firej.org/  — реф-прототип (не трогать)
 ├── Dockerfile / docker-compose.yml / docker-compose.prod.yml
 └── Makefile
 ```
@@ -87,10 +87,10 @@ make dev    # поднимет MariaDB в docker и запустит `go run` л
 make deploy
 ```
 
-Сделает `rsync` исходников на `firej@finfor.me:/opt/tobedone`, соберёт там образ `tobedone:latest` и перезапустит сервис из `/opt/traefik/docker-compose.yml`.
+Сделает `rsync` исходников на `firej@firej.org:/opt/tobedone`, соберёт там образ `tobedone:latest` и перезапустит сервис из `/opt/traefik/docker-compose.yml`.
 
 Перед первым деплоем нужно:
-1. На проде в `/opt/traefik/docker-compose.yml` добавить сервис `tobedone` (см. `docker-compose.prod.yml` — там готовый сниппет с Traefik-лейблами на `tbd.finfor.me`).
+1. На проде в `/opt/traefik/docker-compose.yml` добавить сервис `tobedone` (см. `docker-compose.prod.yml` — там готовый сниппет с Traefik-лейблами на `tbd.firej.org`).
 2. Завести БД и пользователя в существующем mariadb-контейнере:
    ```sql
    CREATE DATABASE tobedone CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -106,7 +106,7 @@ make deploy
 
 ## Дизайн-референс
 
-Папка `design-preview-tbd.finfor.me/` — React-прототип со всей версткой. Файлы:
+Папка `design-preview-tbd.firej.org/` — React-прототип со всей версткой. Файлы:
 - `API.md` — спецификация бекенда (по ней сделано API).
 - `themes.css` — токены трёх тем (используется paper).
 - `src/*.jsx` — компоненты: `tile.jsx`, `tasklist.jsx`, `sync.jsx`, `topbar.jsx`, `app.jsx`, `data.jsx`.
