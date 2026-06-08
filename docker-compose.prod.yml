@@ -19,5 +19,5 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.tobedone.rule=Host(`tbd.firej.org`)"
       - "traefik.http.routers.tobedone.entrypoints=websecure"
-      - "traefik.http.routers.tobedone.tls.certresolver=le"
+      - "traefik.http.routers.tobedone.tls.certresolver=letsencrypt"
       - "traefik.http.services.tobedone.loadbalancer.server.port=8080"
