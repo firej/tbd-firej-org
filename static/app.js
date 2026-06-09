@@ -28,6 +28,7 @@
   let tasks = loadCache();
   let pending = loadPending();
   let editingId = null;     // id задачи, редактируемой в модалке (или null)
+  let createAtEnd = false;  // true — модалка открыта с плюс-плитки, новая задача встаёт в конец
   let syncState = 'synced'; // synced | syncing | offline | error
   let syncTimer = null;
   let dragJustEnded = 0;    // timestamp окончания drag — используем чтобы не открывать модалку по синтетическому click'у Sortable'а
@@ -279,6 +280,13 @@
     ].join('');
   }
 
+  // Плюс-плитка в конце сетки — создание задачи в конец списка.
+  const ADD_TILE_HTML = [
+    '<button class="tile-add" type="button" aria-label="Новая задача" title="Новая задача">',
+      '<svg width="30" height="30" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 3v10M3 8h10"/></svg>',
+    '</button>'
+  ].join('');
+
   function getFiltered() {
     const q = (document.getElementById('search').value || '').toLowerCase().trim();
     let list = tasks.slice().sort((a, b) => (a.position || 0) - (b.position || 0));
@@ -296,7 +304,7 @@
     const grid = document.getElementById('tiles');
     const empty = document.getElementById('empty');
     const list = getFiltered();
-    grid.innerHTML = list.map(tileHTML).join('');
+    grid.innerHTML = list.map(tileHTML).join('') + ADD_TILE_HTML;
     empty.hidden = list.length > 0;
     updateMeta(list.length);
   }
@@ -349,6 +357,11 @@
       fallbackTolerance: 4,
       delay: 100,           // долгий тап — драг (важно для мобилы, чтобы скролл работал)
       delayOnTouchOnly: true,
+      draggable: '.tile',   // плюс-плитка не перетаскивается
+      onMove: function (evt) {
+        // нельзя бросить карточку ПОСЛЕ плюс-плитки — она всегда последняя
+        if (evt.related && evt.related.classList.contains('tile-add')) return !evt.willInsertAfter;
+      },
       onStart: function () { dragJustEnded = 0; },
       onEnd: async function (evt) {
         // Sortable с forceFallback после drop диспатчит синтетический click —
@@ -416,19 +429,23 @@
   }
 
   // ── CRUD ──────────────────────────────────────────────────
-  async function createTask(payload) {
+  async function createTask(payload, atEnd) {
     // оптимистично — создаём временный id, реальный придёт с сервера
+    const positions = tasks.map(t => t.position || 0);
     const tmp = {
       id: 'tmp_' + uuid(),
       title: payload.title, note: payload.note || '',
       color: payload.color, size: payload.size,
       tag: payload.tag || '', done: false,
-      position: tasks.length ? Math.min.apply(null, tasks.map(t => t.position || 0)) - 1024 : 1024,
+      position: tasks.length
+        ? (atEnd ? Math.max.apply(null, positions) + 1024 : Math.min.apply(null, positions) - 1024)
+        : 1024,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       due_at: payload.due_at || null,
     };
-    tasks.unshift(tmp);
+    if (atEnd) tasks.push(tmp);
+    else       tasks.unshift(tmp);
     saveCache();
     renderAll();
     initSortable();
@@ -506,8 +523,9 @@
   }
 
   // ── modal ─────────────────────────────────────────────────
-  function openModal(task) {
+  function openModal(task, atEnd) {
     editingId = task ? task.id : null;
+    createAtEnd = !task && !!atEnd;
     const modal = document.getElementById('task-modal');
     document.getElementById('modal-overlay').hidden = false;
 
@@ -627,6 +645,9 @@
       // Игнорируем синтетический click сразу после drag (Sortable forceFallback).
       if (Date.now() - dragJustEnded < 350) return;
 
+      // плюс-плитка — новая задача в конец списка
+      if (e.target.closest('.tile-add')) { openModal(null, true); return; }
+
       const tile = e.target.closest('.tile');
       if (!tile) return;
       const id = tile.dataset.id;
@@ -672,7 +693,7 @@
       const data = readModal();
       if (!data.title) { document.getElementById('f-title').focus(); return; }
       if (editingId) patchTask(editingId, data);
-      else           createTask(data);
+      else           createTask(data, createAtEnd);
       closeModal();
     });
     document.getElementById('modal-delete').addEventListener('click', () => {

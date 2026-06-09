@@ -228,6 +228,28 @@ body > * { position: relative; z-index: 1; }
   .tile-grid .tile--l    { grid-column: span 2; grid-row: span 2; }
 }
 
+/* ── Add tile (плюс-плитка в конце сетки) ───────────────────── */
+
+.tile-add {
+  grid-column: span 1;
+  grid-row: span 1;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-tile);
+  border: 2px dashed var(--border);
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  padding: 0;
+  transition: color 160ms, border-color 160ms, background 160ms, transform 160ms;
+}
+.tile-add:hover {
+  color: var(--ink-soft);
+  border-color: var(--ink-faint);
+  background: var(--surface-2);
+}
+.tile-add:active { transform: scale(0.97); }
+
 /* ── Tile ───────────────────────────────────────────────────── */
 
 .tile {
