@@ -799,6 +799,13 @@
       document.addEventListener(ev, () => {
         if (fsElement()) { dashWanted = true; acquireWake(); }
         else if (dashWanted) { dashWanted = false; releaseWake(); }
+        // на планшете системный статус-бар и кнопка выхода ложатся поверх
+        // страницы — класс опускает топбар (см. .fs-touch в app.css)
+        document.documentElement.classList.toggle('fs-touch',
+          !!fsElement() && matchMedia('(pointer: coarse)').matches);
+        // выход из fullscreen асинхронный: кнопку обновляем всегда, даже
+        // если dashWanted уже сброшен кликом
+        updateWakeBtn();
       });
     });
     document.addEventListener('visibilitychange', () => {

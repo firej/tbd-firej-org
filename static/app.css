@@ -82,6 +82,10 @@ body > * { position: relative; z-index: 1; }
   background: color-mix(in oklab, var(--accent-terra) 12%, transparent);
 }
 
+/* Полный экран на планшете: iPadOS рисует поверх страницы статус-бар
+   (время/батарея) и кнопку выхода — опускаем топбар, чтобы не перекрывались */
+.fs-touch .topbar { padding-top: 64px; }
+
 .btn {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 8px 14px;
