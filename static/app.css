@@ -76,6 +76,11 @@ body > * { position: relative; z-index: 1; }
   font-weight: 600; font-size: 12px;
   letter-spacing: 0.5px;
 }
+.iconbtn.active {
+  color: var(--accent-terra);
+  border-color: var(--accent-terra);
+  background: color-mix(in oklab, var(--accent-terra) 12%, transparent);
+}
 
 .btn {
   display: inline-flex; align-items: center; gap: 6px;

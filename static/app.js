@@ -597,6 +597,61 @@
     }
   }
 
+  // ── режим дашборда: полный экран + не гасить подсветку ────
+  // Источник правды — fullscreen-статус: вошли в полный экран →
+  // взяли wake lock, вышли (кнопкой, Esc, жестом) → отпустили.
+  // Если Fullscreen API нет — кнопка работает как чистый wake lock.
+  // Wake lock система отпускает при уходе вкладки в фон —
+  // переполучаем на visibilitychange, пока режим включён.
+  let dashWanted = false;   // режим включён (в памяти; fullscreen не переживает reload)
+  let wakeSentinel = null;  // активный WakeLockSentinel или null
+
+  // Fullscreen API с webkit-префиксами (iPadOS Safari)
+  const fsSupported = !!(document.documentElement.requestFullscreen ||
+                         document.documentElement.webkitRequestFullscreen);
+  function fsElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+  function fsRequest() {
+    const el = document.documentElement;
+    if (el.requestFullscreen) return el.requestFullscreen();
+    return Promise.resolve(el.webkitRequestFullscreen());
+  }
+  function fsExit() {
+    if (document.exitFullscreen) return document.exitFullscreen();
+    return Promise.resolve(document.webkitExitFullscreen());
+  }
+
+  function updateWakeBtn() {
+    const btn = document.getElementById('wake-btn');
+    if (!btn) return;
+    const on = !!fsElement() || !!wakeSentinel;
+    btn.classList.toggle('active', on);
+    btn.title = on ? 'Выйти из режима дашборда'
+                   : 'Дашборд: во весь экран, не гасить подсветку';
+  }
+
+  async function acquireWake() {
+    if (!('wakeLock' in navigator)) return;
+    if (wakeSentinel || document.visibilityState !== 'visible') return;
+    try {
+      wakeSentinel = await navigator.wakeLock.request('screen');
+      wakeSentinel.addEventListener('release', () => {
+        wakeSentinel = null;
+        updateWakeBtn();
+      });
+    } catch (err) {
+      // запрет браузера / экономия батареи — остаёмся просто в полном экране
+    }
+    updateWakeBtn();
+  }
+
+  async function releaseWake() {
+    if (wakeSentinel) { try { await wakeSentinel.release(); } catch (e) {} }
+    wakeSentinel = null;
+    updateWakeBtn();
+  }
+
   // ── modal ─────────────────────────────────────────────────
   function openModal(task, atEnd) {
     editingId = task ? task.id : null;
@@ -688,6 +743,37 @@
     document.getElementById('sync-btn').addEventListener('click', () => {
       flushPending().then(pullAll);
     });
+
+    // режим дашборда — полный экран + wake lock
+    const wakeBtn = document.getElementById('wake-btn');
+    const wakeSupported = 'wakeLock' in navigator;
+    if (!fsSupported && !wakeSupported) {
+      wakeBtn.hidden = true;
+    } else {
+      wakeBtn.addEventListener('click', () => {
+        if (fsSupported) {
+          if (fsElement()) {
+            fsExit(); // dashWanted сбросит fullscreenchange
+          } else {
+            dashWanted = true;
+            fsRequest().catch(() => { dashWanted = false; updateWakeBtn(); });
+          }
+        } else {
+          // fallback: только wake lock
+          dashWanted = !dashWanted;
+          if (dashWanted) acquireWake(); else releaseWake();
+        }
+      });
+      ['fullscreenchange', 'webkitfullscreenchange'].forEach(ev => {
+        document.addEventListener(ev, () => {
+          if (fsElement()) { dashWanted = true; acquireWake(); }
+          else             { dashWanted = false; releaseWake(); }
+        });
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (dashWanted && document.visibilityState === 'visible') acquireWake();
+      });
+    }
 
     // создание задачи
     document.getElementById('new-task-btn').addEventListener('click', () => openModal(null));
