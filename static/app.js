@@ -603,8 +603,28 @@
   // Если Fullscreen API нет — кнопка работает как чистый wake lock.
   // Wake lock система отпускает при уходе вкладки в фон —
   // переполучаем на visibilitychange, пока режим включён.
-  let dashWanted = false;   // режим включён (в памяти; fullscreen не переживает reload)
-  let wakeSentinel = null;  // активный WakeLockSentinel или null
+  // В WKWebView-браузерах на iPad (Яндекс, Chrome) нет ни того, ни
+  // другого API — там экран держит зацикленное видео с беззвучной
+  // аудиодорожкой (трюк NoSleep.js).
+  let dashWanted = false;    // режим включён (в памяти; fullscreen не переживает reload)
+  let wakeSentinel = null;   // активный WakeLockSentinel или null
+  let wakeVideo = null;      // <video>-фоллбек для браузеров без Wake Lock API
+  let wakeApiBroken = false; // wakeLock есть, но request отвергается (webview)
+
+  function getWakeVideo() {
+    if (!wakeVideo) {
+      wakeVideo = document.createElement('video');
+      wakeVideo.setAttribute('playsinline', '');
+      wakeVideo.loop = true;
+      // звука нет: дорожка в файле тихая; muted нельзя — iOS не считает
+      // беззвучное видео поводом держать экран
+      wakeVideo.src = '/static/wake.mp4';
+      wakeVideo.style.cssText =
+        'position:fixed;left:-10px;top:-10px;width:2px;height:2px;opacity:0;pointer-events:none;';
+      document.body.appendChild(wakeVideo);
+    }
+    return wakeVideo;
+  }
 
   // Fullscreen API с webkit-префиксами (iPadOS Safari)
   const fsSupported = !!(document.documentElement.requestFullscreen ||
@@ -625,30 +645,44 @@
   function updateWakeBtn() {
     const btn = document.getElementById('wake-btn');
     if (!btn) return;
-    const on = !!fsElement() || !!wakeSentinel;
+    const on = !!fsElement() || !!wakeSentinel || !!(wakeVideo && !wakeVideo.paused);
     btn.classList.toggle('active', on);
     btn.title = on ? 'Выйти из режима дашборда'
                    : 'Дашборд: во весь экран, не гасить подсветку';
   }
 
   async function acquireWake() {
-    if (!('wakeLock' in navigator)) return;
-    if (wakeSentinel || document.visibilityState !== 'visible') return;
-    try {
-      wakeSentinel = await navigator.wakeLock.request('screen');
-      wakeSentinel.addEventListener('release', () => {
-        wakeSentinel = null;
+    if (document.visibilityState !== 'visible') return;
+    if ('wakeLock' in navigator && !wakeApiBroken) {
+      if (wakeSentinel) return;
+      try {
+        wakeSentinel = await navigator.wakeLock.request('screen');
+        wakeSentinel.addEventListener('release', () => {
+          wakeSentinel = null;
+          // Лок отняли, хотя вкладка видима и режим включён (WebKit так
+          // делает, например, при входе в fullscreen) — нативному API тут
+          // доверия нет, переходим на видео-фоллбек.
+          if (dashWanted && document.visibilityState === 'visible') {
+            wakeApiBroken = true;
+            acquireWake();
+          }
+          updateWakeBtn();
+        });
         updateWakeBtn();
-      });
-    } catch (err) {
-      // запрет браузера / экономия батареи — остаёмся просто в полном экране
+        return;
+      } catch (err) {
+        // API есть, но запрещён (webview) — дальше пробуем видео
+        wakeApiBroken = true;
+      }
     }
+    try { await getWakeVideo().play(); } catch (e) { /* low power mode и т.п. */ }
     updateWakeBtn();
   }
 
   async function releaseWake() {
     if (wakeSentinel) { try { await wakeSentinel.release(); } catch (e) {} }
     wakeSentinel = null;
+    if (wakeVideo && !wakeVideo.paused) wakeVideo.pause();
     updateWakeBtn();
   }
 
@@ -744,36 +778,32 @@
       flushPending().then(pullAll);
     });
 
-    // режим дашборда — полный экран + wake lock
-    const wakeBtn = document.getElementById('wake-btn');
-    const wakeSupported = 'wakeLock' in navigator;
-    if (!fsSupported && !wakeSupported) {
-      wakeBtn.hidden = true;
-    } else {
-      wakeBtn.addEventListener('click', () => {
-        if (fsSupported) {
-          if (fsElement()) {
-            fsExit(); // dashWanted сбросит fullscreenchange
-          } else {
-            dashWanted = true;
-            fsRequest().catch(() => { dashWanted = false; updateWakeBtn(); });
-          }
-        } else {
-          // fallback: только wake lock
-          dashWanted = !dashWanted;
-          if (dashWanted) acquireWake(); else releaseWake();
+    // режим дашборда — полный экран + wake lock (кнопка видна всегда:
+    // видео-фоллбек работает даже там, где нет обоих API)
+    document.getElementById('wake-btn').addEventListener('click', () => {
+      if (dashWanted) {
+        dashWanted = false;
+        if (fsElement()) fsExit();
+        releaseWake();
+      } else {
+        dashWanted = true;
+        // wake берём прямо здесь — video.play() требует жеста пользователя
+        acquireWake();
+        if (fsSupported && !fsElement()) {
+          fsRequest().catch(() => { /* fullscreen не дали — остаёмся с wake */ });
         }
+        updateWakeBtn();
+      }
+    });
+    ['fullscreenchange', 'webkitfullscreenchange'].forEach(ev => {
+      document.addEventListener(ev, () => {
+        if (fsElement()) { dashWanted = true; acquireWake(); }
+        else if (dashWanted) { dashWanted = false; releaseWake(); }
       });
-      ['fullscreenchange', 'webkitfullscreenchange'].forEach(ev => {
-        document.addEventListener(ev, () => {
-          if (fsElement()) { dashWanted = true; acquireWake(); }
-          else             { dashWanted = false; releaseWake(); }
-        });
-      });
-      document.addEventListener('visibilitychange', () => {
-        if (dashWanted && document.visibilityState === 'visible') acquireWake();
-      });
-    }
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (dashWanted && document.visibilityState === 'visible') acquireWake();
+    });
 
     // создание задачи
     document.getElementById('new-task-btn').addEventListener('click', () => openModal(null));
