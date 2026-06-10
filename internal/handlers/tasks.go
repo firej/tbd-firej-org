@@ -25,11 +25,12 @@ func scanTask(scanner interface {
 		dueAt   sql.NullTime
 		compAt  sql.NullTime
 		subRaw  sql.NullString
+		recur   sql.NullString
 		doneInt int
 	)
 	err := scanner.Scan(
 		&t.ID, &t.UserID, &t.Title, &note, &t.Color, &t.Size, &tag,
-		&doneInt, &t.Position, &t.CreatedAt, &t.UpdatedAt, &dueAt, &compAt, &subRaw,
+		&doneInt, &t.Position, &t.CreatedAt, &t.UpdatedAt, &dueAt, &compAt, &subRaw, &recur,
 	)
 	if err != nil {
 		return nil, err
@@ -50,13 +51,42 @@ func scanTask(scanner interface {
 	if subRaw.Valid && subRaw.String != "" {
 		_ = json.Unmarshal([]byte(subRaw.String), &t.Sub)
 	}
+	if recur.Valid {
+		t.Repeat = recur.String
+	}
 	return &t, nil
 }
 
 const taskSelectCols = `
 	id, user_id, title, note, color, size, tag,
-	done, position, created_at, updated_at, due_at, completed_at, sub
+	done, position, created_at, updated_at, due_at, completed_at, sub, recurrence
 `
+
+// nextOccurrence — следующее наступление повторяющейся задачи строго позже now.
+// База — текущий due_at (или now, если срока не было); шагаем, пока не уйдём в будущее.
+func nextOccurrence(due *time.Time, repeat string, now time.Time) time.Time {
+	base := now
+	if due != nil {
+		base = *due
+	}
+	step := func(t time.Time) time.Time {
+		switch repeat {
+		case "daily":
+			return t.AddDate(0, 0, 1)
+		case "weekly":
+			return t.AddDate(0, 0, 7)
+		case "monthly":
+			return t.AddDate(0, 1, 0)
+		default: // yearly
+			return t.AddDate(1, 0, 0)
+		}
+	}
+	next := step(base)
+	for !next.After(now) {
+		next = step(next)
+	}
+	return next
+}
 
 // ── List ───────────────────────────────────────────────────────────
 
@@ -93,6 +123,7 @@ type createTaskPayload struct {
 	Tag      string     `json:"tag"`
 	DueAt    *time.Time `json:"due_at"`
 	Position *float64   `json:"position"`
+	Repeat   string     `json:"repeat"`
 }
 
 func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +144,9 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if !models.AllowedSizes[p.Size] {
 		p.Size = "s"
+	}
+	if p.Repeat != "" && !models.AllowedRepeats[p.Repeat] {
+		p.Repeat = ""
 	}
 
 	// Если позиция не задана — кладём в начало (минимальная позиция - 1).
@@ -145,9 +179,9 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := h.db.Exec(`
-		INSERT INTO tasks (id, user_id, title, note, color, size, tag, done, position, due_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-		id, uid, p.Title, noteVal, p.Color, p.Size, tagVal, pos, dueAt,
+		INSERT INTO tasks (id, user_id, title, note, color, size, tag, done, position, due_at, recurrence)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+		id, uid, p.Title, noteVal, p.Color, p.Size, tagVal, pos, dueAt, nullIfEmpty(p.Repeat),
 	)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "insert error")
@@ -185,6 +219,19 @@ func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
 	sets := []string{}
 	args := []interface{}{}
 
+	// Завершение повторяющейся задачи — не done, а перенос на следующий раз:
+	// due_at уезжает вперёд, задача остаётся открытой.
+	if v, ok := raw["done"]; ok {
+		var b bool
+		if json.Unmarshal(v, &b) == nil && b {
+			if t, err := h.getTask(uid, id); err == nil && t.Repeat != "" {
+				delete(raw, "done")
+				sets = append(sets, "due_at = ?", "done = 0", "completed_at = NULL")
+				args = append(args, nextOccurrence(t.DueAt, t.Repeat, time.Now().UTC()))
+			}
+		}
+	}
+
 	setStr := func(key, col string, validate func(string) bool) {
 		if v, ok := raw[key]; ok {
 			var s string
@@ -192,7 +239,7 @@ func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
 				if validate == nil || validate(s) {
 					sets = append(sets, col+" = ?")
 					var arg interface{} = s
-					if s == "" && (col == "note" || col == "tag") {
+					if s == "" && (col == "note" || col == "tag" || col == "recurrence") {
 						arg = nil
 					}
 					args = append(args, arg)
@@ -249,6 +296,7 @@ func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
 	setStr("color", "color", func(s string) bool { return models.AllowedColors[s] })
 	setStr("size", "size", func(s string) bool { return models.AllowedSizes[s] })
 	setStr("tag", "tag", nil)
+	setStr("repeat", "recurrence", func(s string) bool { return s == "" || models.AllowedRepeats[s] })
 	setBool("done", "done")
 	setFloat("position", "position")
 	setTime("due_at", "due_at")
@@ -431,6 +479,9 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 			if !models.AllowedSizes[t.Size] {
 				t.Size = "s"
 			}
+			if t.Repeat != "" && !models.AllowedRepeats[t.Repeat] {
+				t.Repeat = ""
+			}
 			// existing updated_at для LWW
 			var existingUpdated sql.NullTime
 			h.db.QueryRow(
@@ -451,14 +502,14 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 				doneInt = 1
 			}
 			h.db.Exec(`
-				INSERT INTO tasks (id, user_id, title, note, color, size, tag, done, position, due_at, sub)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				INSERT INTO tasks (id, user_id, title, note, color, size, tag, done, position, due_at, sub, recurrence)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON DUPLICATE KEY UPDATE
 				  title=VALUES(title), note=VALUES(note), color=VALUES(color), size=VALUES(size),
 				  tag=VALUES(tag), done=VALUES(done), position=VALUES(position),
-				  due_at=VALUES(due_at), sub=VALUES(sub)
+				  due_at=VALUES(due_at), sub=VALUES(sub), recurrence=VALUES(recurrence)
 			`, t.ID, uid, t.Title, nullIfEmpty(t.Note), t.Color, t.Size, nullIfEmpty(t.Tag),
-				doneInt, t.Position, dueAt, string(subJSON))
+				doneInt, t.Position, dueAt, string(subJSON), nullIfEmpty(t.Repeat))
 		}
 	}
 

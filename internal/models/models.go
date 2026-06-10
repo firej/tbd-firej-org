@@ -31,6 +31,7 @@ type Task struct {
 	DueAt       *time.Time `json:"due_at"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	Sub         []SubTask  `json:"sub,omitempty"`
+	Repeat      string     `json:"repeat,omitempty"` // '' | daily | weekly | monthly | yearly
 }
 
 type SubTask struct {
@@ -46,4 +47,8 @@ var AllowedColors = map[string]bool{
 
 var AllowedSizes = map[string]bool{
 	"s": true, "m": true, "wide": true, "l": true,
+}
+
+var AllowedRepeats = map[string]bool{
+	"daily": true, "weekly": true, "monthly": true, "yearly": true,
 }

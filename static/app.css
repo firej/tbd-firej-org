@@ -5,6 +5,9 @@
 body { position: relative; }
 body > * { position: relative; z-index: 1; }
 
+/* атрибут hidden должен побеждать классы с display (например .btn) */
+[hidden] { display: none !important; }
+
 /* ── Topbar ─────────────────────────────────────────────────── */
 
 .topbar {
@@ -320,6 +323,20 @@ body > * { position: relative; z-index: 1; }
   opacity: 0.78;
   white-space: nowrap;
 }
+.tile-repeat {
+  display: inline-grid;
+  place-items: center;
+  opacity: 0.78;
+  flex-shrink: 0;
+}
+
+/* вспышка при выполнении повторяющейся задачи — перед переносом срока */
+.tile-rolled .tile-check { animation: roll-pop 500ms cubic-bezier(.2,.7,.3,1.4); }
+@keyframes roll-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.35); }
+  100% { transform: scale(1); }
+}
 
 .tile-title {
   margin: 0;
@@ -454,7 +471,11 @@ body > * { position: relative; z-index: 1; }
   font-size: 14px;
   color: var(--ink);
   outline: none;
+  /* без appearance:none WebKit (iPad) рисует datetime-local своей высоты */
+  -webkit-appearance: none;
+  appearance: none;
 }
+.field input { height: 38px; }
 .field input:focus, .field textarea:focus {
   border-color: var(--accent-terra);
   background: var(--surface);

@@ -24,6 +24,15 @@
   const COLORS = ['terra', 'indigo', 'olive', 'mustard', 'rose', 'clay'];
   const SIZES  = ['s', 'm', 'wide', 'l'];
 
+  const REPEAT_LABELS = {
+    daily:   'каждый день',
+    weekly:  'каждую неделю',
+    monthly: 'каждый месяц',
+    yearly:  'каждый год',
+  };
+  // приблизительная длина периода — только для расчёта "жара" плитки
+  const REPEAT_MS = { daily: DAY, weekly: DAY * 7, monthly: DAY * 30, yearly: DAY * 365 };
+
   // ── состояние ─────────────────────────────────────────────
   let tasks = loadCache();
   let pending = loadPending();
@@ -172,8 +181,10 @@
   // ── rendering ─────────────────────────────────────────────
   function heatOf(task) {
     if (!task.due_at) return 0;
-    const created = new Date(task.created_at).getTime() || (Date.now() - HOUR);
+    let created = new Date(task.created_at).getTime() || (Date.now() - HOUR);
     const due = new Date(task.due_at).getTime();
+    // у повторяющихся окно жара — один период до срока, иначе они вечно "горят"
+    if (task.repeat && REPEAT_MS[task.repeat]) created = due - REPEAT_MS[task.repeat];
     if (!due || due <= created) return 1;
     const ratio = (Date.now() - created) / (due - created);
     return Math.max(0, Math.min(2, ratio));
@@ -264,6 +275,11 @@
               task.done ? '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M3 8.5l3 3 7-7"/></svg>' : '',
             '</button>',
             task.tag ? '<span class="tile-tag">' + escapeHtml(task.tag) + '</span>' : '',
+            task.repeat && REPEAT_LABELS[task.repeat]
+              ? '<span class="tile-repeat" title="' + REPEAT_LABELS[task.repeat] + '">' +
+                  '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13.5 8A5.5 5.5 0 1 1 11.6 3.9"/><path d="M12 1.5l1 2.7-2.7 1"/></svg>' +
+                '</span>'
+              : '',
             task.due_at ? '<span class="tile-due-short">' + escapeHtml(formatDueShort(task.due_at)) + '</span>' : '',
           '</header>',
           '<h3 class="tile-title">', escapeHtml(task.title), '</h3>',
@@ -437,6 +453,7 @@
       title: payload.title, note: payload.note || '',
       color: payload.color, size: payload.size,
       tag: payload.tag || '', done: false,
+      repeat: payload.repeat || '',
       position: tasks.length
         ? (atEnd ? Math.max.apply(null, positions) + 1024 : Math.min.apply(null, positions) - 1024)
         : 1024,
@@ -459,6 +476,7 @@
           title: payload.title, note: payload.note,
           color: payload.color, size: payload.size,
           tag: payload.tag, due_at: payload.due_at,
+          repeat: payload.repeat || '',
           position: tmp.position,
         }),
       });
@@ -473,6 +491,63 @@
       setSyncState(navigator.onLine ? 'error' : 'offline');
     } finally {
       inFlightCreates--;
+    }
+  }
+
+  // Следующее наступление повторяющейся задачи — строго в будущем.
+  // Зеркало серверного nextOccurrence: база — текущий due_at (или now).
+  function nextDueAt(due, repeat) {
+    const now = Date.now();
+    let d = due ? new Date(due) : new Date();
+    if (isNaN(d.getTime())) d = new Date();
+    function step(x) {
+      const n = new Date(x);
+      if (repeat === 'daily')        n.setDate(n.getDate() + 1);
+      else if (repeat === 'weekly')  n.setDate(n.getDate() + 7);
+      else if (repeat === 'monthly') n.setMonth(n.getMonth() + 1);
+      else                           n.setFullYear(n.getFullYear() + 1);
+      return n;
+    }
+    let next = step(d);
+    while (next.getTime() <= now) next = step(next);
+    return next.toISOString();
+  }
+
+  // Завершение повторяющейся задачи: короткая вспышка галочки,
+  // затем перенос срока на следующий раз — задача остаётся открытой.
+  async function completeRecurring(t, tileEl) {
+    const id = t.id;
+    const i = tasks.findIndex(x => x.id === id);
+    if (i < 0) return;
+
+    // оптимистично двигаем срок сразу, рендерим после вспышки
+    tasks[i].due_at = nextDueAt(tasks[i].due_at, tasks[i].repeat);
+    tasks[i].updated_at = new Date().toISOString();
+    saveCache();
+
+    const check = tileEl && tileEl.querySelector('.tile-check');
+    if (check) {
+      check.classList.add('done');
+      check.innerHTML = '<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M3 8.5l3 3 7-7"/></svg>';
+    }
+    if (tileEl) tileEl.classList.add('tile-rolled');
+    setTimeout(() => { renderAll(); initSortable(); }, 500);
+
+    if (id.indexOf('tmp_') === 0) return; // на сервер уедет вместе с созданием
+
+    try {
+      setSyncState('syncing');
+      const data = await api('/api/tasks/' + id, {
+        method: 'PATCH', body: JSON.stringify({ done: true }),
+      });
+      if (data && data.task) {
+        const j = tasks.findIndex(x => x.id === id);
+        if (j >= 0) { tasks[j] = data.task; saveCache(); }
+      }
+      setSyncState('synced');
+    } catch (err) {
+      enqueue({ method: 'PATCH', path: '/api/tasks/' + id, body: { done: true } });
+      setSyncState(navigator.onLine ? 'error' : 'offline');
     }
   }
 
@@ -548,13 +623,17 @@
     }
     document.getElementById('f-due').value = dueLocal;
 
-    const color = task ? task.color : 'indigo';
-    const size  = task ? task.size  : 's';
+    const color  = task ? task.color : 'indigo';
+    const size   = task ? task.size  : 's';
+    const repeat = task ? (task.repeat || '') : '';
     document.querySelectorAll('#f-colors .sw').forEach(el => {
       el.classList.toggle('selected', el.dataset.v === color);
     });
     document.querySelectorAll('#f-sizes button').forEach(el => {
       el.classList.toggle('selected', el.dataset.v === size);
+    });
+    document.querySelectorAll('#f-repeat button').forEach(el => {
+      el.classList.toggle('selected', (el.dataset.v || '') === repeat);
     });
 
     if (typeof modal.showModal === 'function') modal.showModal();
@@ -571,8 +650,9 @@
   }
 
   function readModal() {
-    const selColor = document.querySelector('#f-colors .sw.selected');
-    const selSize  = document.querySelector('#f-sizes button.selected');
+    const selColor  = document.querySelector('#f-colors .sw.selected');
+    const selSize   = document.querySelector('#f-sizes button.selected');
+    const selRepeat = document.querySelector('#f-repeat button.selected');
     const dueRaw = document.getElementById('f-due').value;
     let due_at = null;
     if (dueRaw) {
@@ -585,6 +665,7 @@
       tag:   document.getElementById('f-tag').value.trim(),
       color: selColor ? selColor.dataset.v : 'indigo',
       size:  selSize  ? selSize.dataset.v  : 's',
+      repeat: selRepeat ? (selRepeat.dataset.v || '') : '',
       due_at,
     };
   }
@@ -657,7 +738,8 @@
       const act = e.target.closest('[data-act]');
       if (act && act.dataset.act === 'toggle') {
         e.stopPropagation();
-        patchTask(id, { done: !t.done });
+        if (t.repeat && !t.done) completeRecurring(t, tile);
+        else patchTask(id, { done: !t.done });
         return;
       }
       if (act && act.dataset.act === 'del') {
@@ -674,6 +756,15 @@
     document.getElementById('modal-cancel').addEventListener('click', closeModal);
     document.getElementById('modal-overlay').addEventListener('click', closeModal);
     document.getElementById('task-modal').addEventListener('cancel', (e) => { e.preventDefault(); closeModal(); });
+    // Клик по подложке: у <dialog> в top layer клик по ::backdrop таргетится
+    // в сам диалог — отличаем его от клика по контенту по координатам.
+    document.getElementById('task-modal').addEventListener('click', (e) => {
+      if (e.target !== e.currentTarget) return;
+      const r = e.currentTarget.getBoundingClientRect();
+      const inside = e.clientX >= r.left && e.clientX <= r.right &&
+                     e.clientY >= r.top  && e.clientY <= r.bottom;
+      if (!inside) closeModal();
+    });
 
     document.querySelectorAll('#f-colors .sw').forEach(el => {
       el.addEventListener('click', () => {
@@ -684,6 +775,12 @@
     document.querySelectorAll('#f-sizes button').forEach(el => {
       el.addEventListener('click', () => {
         document.querySelectorAll('#f-sizes button').forEach(x => x.classList.remove('selected'));
+        el.classList.add('selected');
+      });
+    });
+    document.querySelectorAll('#f-repeat button').forEach(el => {
+      el.addEventListener('click', () => {
+        document.querySelectorAll('#f-repeat button').forEach(x => x.classList.remove('selected'));
         el.classList.add('selected');
       });
     });

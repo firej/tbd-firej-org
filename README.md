@@ -75,6 +75,9 @@ make dev    # поднимет MariaDB в docker и запустит `go run` л
 - `GET    /api/tasks`                 → `{ tasks: [...] }`, отсортированы по `position ASC`.
 - `POST   /api/tasks`                 — создать.
 - `PATCH  /api/tasks/{id}`            — частичное обновление (любое подмножество полей).
+  Поле `repeat` (`daily | weekly | monthly | yearly | ""`) делает задачу повторяющейся:
+  `PATCH { done: true }` для неё не закрывает задачу, а переносит `due_at` на следующее
+  наступление (строго в будущем; в БД колонка называется `recurrence` — `repeat` зарезервирован).
 - `DELETE /api/tasks/{id}`            — удалить.
 - `POST   /api/tasks/{id}/reorder`    — `{ before?: id, after?: id }`, серверный пересчёт `position`.
 - `POST   /api/tasks/sync`            — `{ since?, changes: [{ op: upsert|delete, id?, task? }] }` → `{ server_changes, server_time, conflicts }`. LWW по `updated_at`.

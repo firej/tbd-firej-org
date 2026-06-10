@@ -1,4 +1,4 @@
-.PHONY: help build run dev clean test fmt vet lint deps up down logs shell db-shell db-only rebuild docker deploy
+.PHONY: help build run dev clean test fmt vet lint deps up down logs shell db-shell db-only rebuild docker deploy ensure-engine
 
 BINARY_NAME=tobedone
 BUILD_DIR=bin
@@ -43,7 +43,13 @@ deps: ## Установить зависимости
 # ── Docker (локально) ─────────────────────────────────────────
 COMPOSE_ENGINE ?= $(shell command -v podman-compose 2>/dev/null || command -v docker-compose 2>/dev/null || echo "docker compose")
 
-up: ## Поднять весь стек (app + mariadb) в docker
+ensure-engine: ## Запустить podman machine, если она есть и выключена
+	@if command -v podman >/dev/null 2>&1 && ! podman info >/dev/null 2>&1; then \
+		echo "$(GREEN)Запуск podman machine...$(NC)"; \
+		podman machine start; \
+	fi
+
+up: ensure-engine ## Поднять весь стек (app + mariadb) в docker
 	@$(COMPOSE_ENGINE) up -d
 	@echo "$(GREEN)✓ http://localhost:8080$(NC)"
 
@@ -59,16 +65,19 @@ shell: ## Shell внутри app-контейнера
 db-shell: ## MariaDB shell
 	@$(COMPOSE_ENGINE) exec mariadb mariadb -u tobedone -ptobedone tobedone
 
-db-only: ## Поднять только MariaDB (для debug-сборки локально через go run)
+db-only: ensure-engine ## Поднять только MariaDB (для debug-сборки локально через go run)
 	@echo "$(GREEN)Запуск MariaDB...$(NC)"
 	@$(COMPOSE_ENGINE) up -d mariadb
 	@echo "$(GREEN)Ожидание готовности MariaDB...$(NC)"
-	@sleep 3
+	@for i in $$(seq 1 30); do \
+		$(COMPOSE_ENGINE) exec mariadb healthcheck.sh --connect --innodb_initialized >/dev/null 2>&1 && break; \
+		sleep 2; \
+	done
 	@echo "$(GREEN)✓ MariaDB на localhost:3306$(NC)"
 
 dev: db-only run ## MariaDB в docker + go run (отладочная сборка)
 
-rebuild: ## Пересобрать и поднять контейнеры
+rebuild: ensure-engine ## Пересобрать и поднять контейнеры
 	@$(COMPOSE_ENGINE) up -d --build
 
 # ── Container engine (для одиночного build) ───────────────────

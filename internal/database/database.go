@@ -34,6 +34,7 @@ func InitDB(db *sql.DB) error {
 			due_at DATETIME NULL,
 			completed_at DATETIME NULL,
 			sub JSON NULL,
+			recurrence VARCHAR(16) NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 	}
@@ -41,6 +42,17 @@ func InitDB(db *sql.DB) error {
 	for _, sqlStmt := range tables {
 		if _, err := db.Exec(sqlStmt); err != nil {
 			return fmt.Errorf("create table: %w", err)
+		}
+	}
+
+	// Миграции для уже существующих БД (MariaDB поддерживает IF NOT EXISTS).
+	// Колонка называется recurrence — `repeat` в MariaDB зарезервированное слово.
+	migrations := []string{
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurrence VARCHAR(16) NULL AFTER sub`,
+	}
+	for _, m := range migrations {
+		if _, err := db.Exec(m); err != nil {
+			return fmt.Errorf("migrate: %w", err)
 		}
 	}
 
