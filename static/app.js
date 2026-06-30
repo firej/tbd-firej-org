@@ -617,13 +617,14 @@
   }
 
   // ── доски (пространства) + шаринг ─────────────────────────
-  let meId = null; // id текущего пользователя (для «покинуть доску»); тянем в boot
+  let meId = null;              // id текущего пользователя (для «покинуть доску»); тянем в boot
+  let switcherMode = 'dropdown'; // 'tabs' (видимые табы) | 'dropdown' (компактный фоллбек)
 
   function currentBoard() {
     return boards.find(b => b.id === currentBoardId) || null;
   }
 
-  // Шапка-переключатель: имя и цветовая точка текущей доски.
+  // Шапка-переключатель (дропдаун): имя и цветовая точка текущей доски.
   function renderBoardHeader() {
     const b = currentBoard();
     const nameEl = document.getElementById('board-name');
@@ -632,7 +633,23 @@
     if (dotEl)  dotEl.className = 'board-dot' + (b ? ' sw-' + b.color : '');
   }
 
-  // Выпадающее меню со списком досок + действиями.
+  // Табы — по кнопке на доску + «＋». Видны на широком экране.
+  function renderBoardTabs() {
+    const wrap = document.getElementById('board-tabs');
+    if (!wrap) return;
+    wrap.innerHTML = boards.map(b => (
+      '<button type="button" class="board-tab' + (b.id === currentBoardId ? ' active' : '') +
+        '" data-bid="' + b.id + '" title="' + escapeHtml(b.name) + '">' +
+        '<span class="board-dot sw-' + b.color + '"></span>' +
+        '<span class="board-tab-name">' + escapeHtml(b.name) + '</span>' +
+        (b.is_owner ? '' : '<span class="board-tab-shared" title="Общая доска">·</span>') +
+      '</button>'
+    )).join('') +
+      '<button type="button" class="board-tab board-tab-add" id="board-tab-add" title="Новая доска">＋</button>';
+  }
+
+  // Выпадающее меню. В режиме табов список досок прячем (он уже в табах),
+  // оставляем только действия с текущей доской.
   function renderBoardMenu() {
     const list = document.getElementById('board-list');
     if (!list) return;
@@ -645,15 +662,43 @@
       '</button>'
     )).join('');
 
+    const tabsMode = switcherMode === 'tabs';
+    list.hidden = tabsMode;
+    document.getElementById('board-menu-divider').hidden = tabsMode;
+    document.getElementById('board-new').hidden = tabsMode; // в табах есть «＋»
+
     const b = currentBoard();
     const owner = b && b.is_owner;
     document.getElementById('board-owner-actions').hidden = !owner;
     document.getElementById('board-leave').hidden = !(b && !owner);
   }
 
+  // Выбор режима переключателя: пробуем табы и проверяем, влезает ли топбар.
+  // Если переполняется (или экран узкий) — откатываемся в дропдаун.
+  function relayoutSwitcher() {
+    const tabs    = document.getElementById('board-tabs');
+    const actions = document.getElementById('board-actions-btn');
+    const btn     = document.getElementById('board-btn');
+    const topbar  = document.querySelector('.topbar');
+    if (!tabs || !topbar) return;
+
+    // временно показываем табы, чтобы измерить
+    tabs.hidden = false; actions.hidden = false; btn.hidden = true;
+    const fits = window.innerWidth >= 720 && topbar.scrollWidth <= topbar.clientWidth + 1;
+
+    switcherMode = fits ? 'tabs' : 'dropdown';
+    if (fits) {
+      tabs.hidden = false; actions.hidden = false; btn.hidden = true;
+    } else {
+      tabs.hidden = true; actions.hidden = true; btn.hidden = false;
+    }
+  }
+
   // Полная перерисовка всего, что зависит от текущей доски.
   function renderBoardUI() {
     renderBoardHeader();
+    renderBoardTabs();
+    relayoutSwitcher();
     renderBoardMenu();
   }
 
@@ -848,7 +893,10 @@
 
   function openBoardMenu() {
     renderBoardMenu();
-    document.getElementById('board-menu').hidden = false;
+    const menu = document.getElementById('board-menu');
+    // в режиме табов меню вызывается кнопкой «⋯» справа — прижимаем к правому краю
+    menu.classList.toggle('align-right', switcherMode === 'tabs');
+    menu.hidden = false;
   }
   function closeBoardMenu() {
     const m = document.getElementById('board-menu');
@@ -1125,19 +1173,35 @@
 
     // ── переключатель досок ──────────────────────────────────
     const boardBtn = document.getElementById('board-btn');
+    const boardActionsBtn = document.getElementById('board-actions-btn');
     const boardMenu = document.getElementById('board-menu');
-    boardBtn.addEventListener('click', (e) => {
+    const toggleMenu = (e) => {
       e.stopPropagation();
       if (boardMenu.hidden) openBoardMenu(); else closeBoardMenu();
-    });
+    };
+    boardBtn.addEventListener('click', toggleMenu);
+    boardActionsBtn.addEventListener('click', toggleMenu);
     document.addEventListener('click', (e) => {
-      if (!boardMenu.hidden && !boardMenu.contains(e.target) && e.target !== boardBtn) {
+      if (!boardMenu.hidden && !boardMenu.contains(e.target) &&
+          e.target !== boardBtn && !boardActionsBtn.contains(e.target)) {
         closeBoardMenu();
       }
     });
     document.getElementById('board-list').addEventListener('click', (e) => {
       const item = e.target.closest('.board-item');
       if (item) switchBoard(item.dataset.bid);
+    });
+    // клики по табам: выбор доски или «＋» (новая доска)
+    document.getElementById('board-tabs').addEventListener('click', (e) => {
+      if (e.target.closest('#board-tab-add')) { openBoardModal('create'); return; }
+      const tab = e.target.closest('.board-tab');
+      if (tab && tab.dataset.bid) switchBoard(tab.dataset.bid);
+    });
+    // пересчёт режима табы/дропдаун при изменении ширины окна
+    let relayoutTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(relayoutTimer);
+      relayoutTimer = setTimeout(() => { relayoutSwitcher(); renderBoardMenu(); }, 120);
     });
     document.getElementById('board-new').addEventListener('click', () => {
       closeBoardMenu(); openBoardModal('create');

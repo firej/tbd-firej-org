@@ -575,7 +575,14 @@ body > * { position: relative; z-index: 1; }
 
 /* ── Board switcher ─────────────────────────────────────────── */
 
-.board-switch { position: relative; margin-left: 10px; }
+.board-switch {
+  position: relative;
+  margin-left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto; /* не сжимается — чтобы переполнение топбара ловилось замером */
+}
 .board-btn {
   display: inline-flex;
   align-items: center;
@@ -601,6 +608,48 @@ body > * { position: relative; z-index: 1; }
 .board-dot:not([class*="sw-"]) { background: var(--accent-indigo); }
 .board-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Табы досок (широкий экран) */
+.board-tabs { display: inline-flex; align-items: center; gap: 4px; }
+.board-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.board-tab:hover { background: var(--surface-2); color: var(--ink); }
+.board-tab.active {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--ink);
+}
+.board-tab-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.board-tab-shared { color: var(--ink-faint); font-weight: 700; }
+.board-tab-add { padding: 0 11px; color: var(--ink-faint); font-size: 16px; }
+.board-tab-add:hover { color: var(--ink); }
+
+.board-actions-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-left: 2px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.board-actions-btn:hover { background: var(--surface); color: var(--ink); }
+
 .board-menu {
   position: absolute;
   top: 44px;
@@ -613,6 +662,7 @@ body > * { position: relative; z-index: 1; }
   padding: 8px;
   z-index: 30;
 }
+.board-menu.align-right { left: auto; right: 0; }
 .board-list { display: flex; flex-direction: column; gap: 2px; }
 .board-menu-item {
   width: 100%;
