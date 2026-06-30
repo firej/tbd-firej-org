@@ -13,12 +13,35 @@ type User struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// Board — доска (пространство). Задачи принадлежат доске, доступ — через board_members.
+type Board struct {
+	ID        string        `json:"id"`
+	OwnerID   int64         `json:"-"`
+	Name      string        `json:"name"`
+	Color     string        `json:"color"`
+	Position  float64       `json:"position"`
+	CreatedAt time.Time     `json:"created_at"`
+	UpdatedAt time.Time     `json:"updated_at"`
+	IsOwner   bool          `json:"is_owner"`          // вычисляемое: текущий юзер — владелец
+	Members   []BoardMember `json:"members,omitempty"` // заполняется по запросу
+}
+
+// BoardMember — участник доски (для UI шаринга).
+type BoardMember struct {
+	UserID      int64  `json:"user_id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name"`
+	AvatarColor string `json:"avatar_color"`
+	IsOwner     bool   `json:"is_owner"`
+}
+
 // Task — задача.
 // Поля Color/Size — enum-строки; валидация в хендлерах.
 // Sub хранится в БД как JSON-колонка, в Go — []SubTask.
 type Task struct {
 	ID          string     `json:"id"`
 	UserID      int64      `json:"-"`
+	BoardID     string     `json:"board_id"`
 	Title       string     `json:"title"`
 	Note        string     `json:"note,omitempty"`
 	Color       string     `json:"color"`

@@ -57,15 +57,30 @@ func main() {
 	r.HandleFunc("/auth/logout", h.Logout).Methods("POST", "GET")
 	r.HandleFunc("/auth/me", h.Me).Methods("GET")
 
-	// Tasks API (требует авторизации)
+	// API (требует авторизации)
 	api := r.PathPrefix("/api").Subrouter()
 	api.Use(h.RequireAuthAPI)
-	api.HandleFunc("/tasks", h.ListTasks).Methods("GET")
-	api.HandleFunc("/tasks", h.CreateTask).Methods("POST")
-	api.HandleFunc("/tasks/sync", h.Sync).Methods("POST")
-	api.HandleFunc("/tasks/{id}", h.PatchTask).Methods("PATCH")
-	api.HandleFunc("/tasks/{id}", h.DeleteTask).Methods("DELETE")
-	api.HandleFunc("/tasks/{id}/reorder", h.ReorderTask).Methods("POST")
+
+	// Boards
+	api.HandleFunc("/boards", h.ListBoards).Methods("GET")
+	api.HandleFunc("/boards", h.CreateBoard).Methods("POST")
+
+	// Всё под конкретной доской — требует членства в ней
+	b := api.PathPrefix("/boards/{bid}").Subrouter()
+	b.Use(h.RequireMember)
+	b.HandleFunc("", h.PatchBoard).Methods("PATCH")
+	b.HandleFunc("", h.DeleteBoard).Methods("DELETE")
+	b.HandleFunc("/members", h.ListMembers).Methods("GET")
+	b.HandleFunc("/members", h.AddMember).Methods("POST")
+	b.HandleFunc("/members/{uid}", h.RemoveMember).Methods("DELETE")
+
+	// Tasks доски
+	b.HandleFunc("/tasks", h.ListTasks).Methods("GET")
+	b.HandleFunc("/tasks", h.CreateTask).Methods("POST")
+	b.HandleFunc("/tasks/sync", h.Sync).Methods("POST")
+	b.HandleFunc("/tasks/{id}", h.PatchTask).Methods("PATCH")
+	b.HandleFunc("/tasks/{id}", h.DeleteTask).Methods("DELETE")
+	b.HandleFunc("/tasks/{id}/reorder", h.ReorderTask).Methods("POST")
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
 	log.Printf("tobedone listening on http://localhost:%s", cfg.Port)

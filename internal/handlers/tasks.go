@@ -20,6 +20,7 @@ func scanTask(scanner interface {
 }) (*models.Task, error) {
 	var (
 		t       models.Task
+		boardID sql.NullString
 		note    sql.NullString
 		tag     sql.NullString
 		dueAt   sql.NullTime
@@ -29,11 +30,14 @@ func scanTask(scanner interface {
 		doneInt int
 	)
 	err := scanner.Scan(
-		&t.ID, &t.UserID, &t.Title, &note, &t.Color, &t.Size, &tag,
+		&t.ID, &t.UserID, &boardID, &t.Title, &note, &t.Color, &t.Size, &tag,
 		&doneInt, &t.Position, &t.CreatedAt, &t.UpdatedAt, &dueAt, &compAt, &subRaw, &recur,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if boardID.Valid {
+		t.BoardID = boardID.String
 	}
 	if note.Valid {
 		t.Note = note.String
@@ -58,7 +62,7 @@ func scanTask(scanner interface {
 }
 
 const taskSelectCols = `
-	id, user_id, title, note, color, size, tag,
+	id, user_id, board_id, title, note, color, size, tag,
 	done, position, created_at, updated_at, due_at, completed_at, sub, recurrence
 `
 
@@ -91,9 +95,9 @@ func nextOccurrence(due *time.Time, repeat string, now time.Time) time.Time {
 // ── List ───────────────────────────────────────────────────────────
 
 func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
-	uid, _ := h.userID(r)
+	bid := mux.Vars(r)["bid"]
 	rows, err := h.db.Query(
-		`SELECT `+taskSelectCols+` FROM tasks WHERE user_id = ? ORDER BY position ASC`, uid,
+		`SELECT `+taskSelectCols+` FROM tasks WHERE board_id = ? ORDER BY position ASC`, bid,
 	)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "db error")
@@ -128,6 +132,7 @@ type createTaskPayload struct {
 
 func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	uid, _ := h.userID(r)
+	bid := mux.Vars(r)["bid"]
 
 	var p createTaskPayload
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
@@ -155,7 +160,7 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		pos = *p.Position
 	} else {
 		var minPos sql.NullFloat64
-		_ = h.db.QueryRow("SELECT MIN(position) FROM tasks WHERE user_id = ?", uid).Scan(&minPos)
+		_ = h.db.QueryRow("SELECT MIN(position) FROM tasks WHERE board_id = ?", bid).Scan(&minPos)
 		if minPos.Valid {
 			pos = minPos.Float64 - 1024
 		} else {
@@ -179,16 +184,16 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err := h.db.Exec(`
-		INSERT INTO tasks (id, user_id, title, note, color, size, tag, done, position, due_at, recurrence)
-		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-		id, uid, p.Title, noteVal, p.Color, p.Size, tagVal, pos, dueAt, nullIfEmpty(p.Repeat),
+		INSERT INTO tasks (id, user_id, board_id, title, note, color, size, tag, done, position, due_at, recurrence)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+		id, uid, bid, p.Title, noteVal, p.Color, p.Size, tagVal, pos, dueAt, nullIfEmpty(p.Repeat),
 	)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "insert error")
 		return
 	}
 
-	t, err := h.getTask(uid, id)
+	t, err := h.getTask(bid, id)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "fetch error")
 		return
@@ -196,9 +201,9 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"task": t})
 }
 
-func (h *Handler) getTask(uid int64, id string) (*models.Task, error) {
+func (h *Handler) getTask(bid, id string) (*models.Task, error) {
 	row := h.db.QueryRow(
-		`SELECT `+taskSelectCols+` FROM tasks WHERE user_id = ? AND id = ?`, uid, id,
+		`SELECT `+taskSelectCols+` FROM tasks WHERE board_id = ? AND id = ?`, bid, id,
 	)
 	return scanTask(row)
 }
@@ -206,7 +211,7 @@ func (h *Handler) getTask(uid int64, id string) (*models.Task, error) {
 // ── Patch ──────────────────────────────────────────────────────────
 
 func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
-	uid, _ := h.userID(r)
+	bid := mux.Vars(r)["bid"]
 	id := mux.Vars(r)["id"]
 
 	var raw map[string]json.RawMessage
@@ -224,7 +229,7 @@ func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
 	if v, ok := raw["done"]; ok {
 		var b bool
 		if json.Unmarshal(v, &b) == nil && b {
-			if t, err := h.getTask(uid, id); err == nil && t.Repeat != "" {
+			if t, err := h.getTask(bid, id); err == nil && t.Repeat != "" {
 				delete(raw, "done")
 				sets = append(sets, "due_at = ?", "done = 0", "completed_at = NULL")
 				args = append(args, nextOccurrence(t.DueAt, t.Repeat, time.Now().UTC()))
@@ -311,8 +316,8 @@ func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	args = append(args, uid, id)
-	q := "UPDATE tasks SET " + strings.Join(sets, ", ") + " WHERE user_id = ? AND id = ?"
+	args = append(args, bid, id)
+	q := "UPDATE tasks SET " + strings.Join(sets, ", ") + " WHERE board_id = ? AND id = ?"
 	res, err := h.db.Exec(q, args...)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "update error")
@@ -323,7 +328,7 @@ func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	t, err := h.getTask(uid, id)
+	t, err := h.getTask(bid, id)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "fetch error")
 		return
@@ -334,9 +339,9 @@ func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
 // ── Delete ─────────────────────────────────────────────────────────
 
 func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
-	uid, _ := h.userID(r)
+	bid := mux.Vars(r)["bid"]
 	id := mux.Vars(r)["id"]
-	res, err := h.db.Exec("DELETE FROM tasks WHERE user_id = ? AND id = ?", uid, id)
+	res, err := h.db.Exec("DELETE FROM tasks WHERE board_id = ? AND id = ?", bid, id)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "delete error")
 		return
@@ -356,14 +361,14 @@ type reorderPayload struct {
 }
 
 // posOrErr возвращает позицию задачи или sql.ErrNoRows.
-func (h *Handler) posOf(uid int64, id string) (float64, error) {
+func (h *Handler) posOf(bid, id string) (float64, error) {
 	var p float64
-	err := h.db.QueryRow("SELECT position FROM tasks WHERE user_id = ? AND id = ?", uid, id).Scan(&p)
+	err := h.db.QueryRow("SELECT position FROM tasks WHERE board_id = ? AND id = ?", bid, id).Scan(&p)
 	return p, err
 }
 
 func (h *Handler) ReorderTask(w http.ResponseWriter, r *http.Request) {
-	uid, _ := h.userID(r)
+	bid := mux.Vars(r)["bid"]
 	id := mux.Vars(r)["id"]
 
 	var p reorderPayload
@@ -379,8 +384,8 @@ func (h *Handler) ReorderTask(w http.ResponseWriter, r *http.Request) {
 	var newPos float64
 	switch {
 	case p.Before != "" && p.After != "":
-		a, errA := h.posOf(uid, p.After)
-		b, errB := h.posOf(uid, p.Before)
+		a, errA := h.posOf(bid, p.After)
+		b, errB := h.posOf(bid, p.Before)
 		if errA != nil || errB != nil {
 			writeJSONError(w, http.StatusBadRequest, "anchor not found")
 			return
@@ -388,15 +393,15 @@ func (h *Handler) ReorderTask(w http.ResponseWriter, r *http.Request) {
 		newPos = (a + b) / 2.0
 	case p.Before != "":
 		// встать перед `before` — берём середину между его соседом сверху и им
-		b, err := h.posOf(uid, p.Before)
+		b, err := h.posOf(bid, p.Before)
 		if err != nil {
 			writeJSONError(w, http.StatusBadRequest, "before not found")
 			return
 		}
 		var prevPos sql.NullFloat64
 		_ = h.db.QueryRow(
-			"SELECT MAX(position) FROM tasks WHERE user_id = ? AND position < ? AND id != ?",
-			uid, b, id,
+			"SELECT MAX(position) FROM tasks WHERE board_id = ? AND position < ? AND id != ?",
+			bid, b, id,
 		).Scan(&prevPos)
 		if prevPos.Valid {
 			newPos = (prevPos.Float64 + b) / 2.0
@@ -404,15 +409,15 @@ func (h *Handler) ReorderTask(w http.ResponseWriter, r *http.Request) {
 			newPos = b - 1024
 		}
 	case p.After != "":
-		a, err := h.posOf(uid, p.After)
+		a, err := h.posOf(bid, p.After)
 		if err != nil {
 			writeJSONError(w, http.StatusBadRequest, "after not found")
 			return
 		}
 		var nextPos sql.NullFloat64
 		_ = h.db.QueryRow(
-			"SELECT MIN(position) FROM tasks WHERE user_id = ? AND position > ? AND id != ?",
-			uid, a, id,
+			"SELECT MIN(position) FROM tasks WHERE board_id = ? AND position > ? AND id != ?",
+			bid, a, id,
 		).Scan(&nextPos)
 		if nextPos.Valid {
 			newPos = (a + nextPos.Float64) / 2.0
@@ -422,14 +427,14 @@ func (h *Handler) ReorderTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := h.db.Exec(
-		"UPDATE tasks SET position = ? WHERE user_id = ? AND id = ?",
-		newPos, uid, id,
+		"UPDATE tasks SET position = ? WHERE board_id = ? AND id = ?",
+		newPos, bid, id,
 	); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "update error")
 		return
 	}
 
-	t, _ := h.getTask(uid, id)
+	t, _ := h.getTask(bid, id)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"task": t})
 }
 
@@ -454,6 +459,7 @@ type syncResponse struct {
 
 func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 	uid, _ := h.userID(r)
+	bid := mux.Vars(r)["bid"]
 
 	var req syncRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -466,7 +472,7 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 		switch ch.Op {
 		case "delete":
 			if ch.ID != "" {
-				h.db.Exec("DELETE FROM tasks WHERE user_id = ? AND id = ?", uid, ch.ID)
+				h.db.Exec("DELETE FROM tasks WHERE board_id = ? AND id = ?", bid, ch.ID)
 			}
 		case "upsert":
 			if ch.Task == nil || ch.Task.ID == "" {
@@ -485,7 +491,7 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 			// existing updated_at для LWW
 			var existingUpdated sql.NullTime
 			h.db.QueryRow(
-				"SELECT updated_at FROM tasks WHERE user_id = ? AND id = ?", uid, t.ID,
+				"SELECT updated_at FROM tasks WHERE board_id = ? AND id = ?", bid, t.ID,
 			).Scan(&existingUpdated)
 			clientUpdated := t.UpdatedAt
 			if existingUpdated.Valid && !clientUpdated.IsZero() && clientUpdated.Before(existingUpdated.Time) {
@@ -502,13 +508,13 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 				doneInt = 1
 			}
 			h.db.Exec(`
-				INSERT INTO tasks (id, user_id, title, note, color, size, tag, done, position, due_at, sub, recurrence)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				INSERT INTO tasks (id, user_id, board_id, title, note, color, size, tag, done, position, due_at, sub, recurrence)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				ON DUPLICATE KEY UPDATE
 				  title=VALUES(title), note=VALUES(note), color=VALUES(color), size=VALUES(size),
 				  tag=VALUES(tag), done=VALUES(done), position=VALUES(position),
 				  due_at=VALUES(due_at), sub=VALUES(sub), recurrence=VALUES(recurrence)
-			`, t.ID, uid, t.Title, nullIfEmpty(t.Note), t.Color, t.Size, nullIfEmpty(t.Tag),
+			`, t.ID, uid, bid, t.Title, nullIfEmpty(t.Note), t.Color, t.Size, nullIfEmpty(t.Tag),
 				doneInt, t.Position, dueAt, string(subJSON), nullIfEmpty(t.Repeat))
 		}
 	}
@@ -519,12 +525,12 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if req.Since != nil {
 		rows, err = h.db.Query(
-			`SELECT `+taskSelectCols+` FROM tasks WHERE user_id = ? AND updated_at >= ? ORDER BY position ASC`,
-			uid, *req.Since,
+			`SELECT `+taskSelectCols+` FROM tasks WHERE board_id = ? AND updated_at >= ? ORDER BY position ASC`,
+			bid, *req.Since,
 		)
 	} else {
 		rows, err = h.db.Query(
-			`SELECT `+taskSelectCols+` FROM tasks WHERE user_id = ? ORDER BY position ASC`, uid,
+			`SELECT `+taskSelectCols+` FROM tasks WHERE board_id = ? ORDER BY position ASC`, bid,
 		)
 	}
 	if err != nil {

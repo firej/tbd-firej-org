@@ -6,7 +6,8 @@
 
 - **Стек:** Go 1.25, `gorilla/mux`, `gorilla/sessions`, `bcrypt`, `go-sql-driver/mysql`, `uuid`.
 - **Фронт:** ванильный JS + SortableJS для drag-and-drop. HTML-шаблоны на `html/template`. Никаких сборщиков.
-- **БД:** MariaDB 11. Таблицы: `users`, `tasks` (с JSON-колонкой `sub` и `position DOUBLE`).
+- **БД:** MariaDB 11. Таблицы: `users`, `boards`, `board_members`, `tasks` (с JSON-колонкой `sub`,
+  `position DOUBLE` и `board_id` — задача живёт на доске, доступ через `board_members`).
 - **Тема:** Paper из прототипа в `design-preview-tbd.firej.org/` (Direction A). Тёмная — toggle в топбаре.
 - **Sync:** локальный кэш в `localStorage` + очередь pending-операций. Топбар показывает 4 состояния: `synced` / `syncing` / `offline` / `error`. При возвращении сети — автоматический flush очереди и pull.
 
@@ -65,22 +66,37 @@ make dev    # поднимет MariaDB в docker и запустит `go run` л
 
 ### Auth API (`Content-Type: application/json` или form-urlencoded)
 
-- `POST /auth/signup` — `{ email, password, display_name }` → `{ user }` + cookie.
+- `POST /auth/signup` — `{ email, password, display_name }` → `{ user }` + cookie. При регистрации
+  заводится дефолтная доска «Личное».
 - `POST /auth/login`  — `{ email, password }` → `{ user }` + cookie.
 - `POST /auth/logout` — очистить сессию.
 - `GET  /auth/me`     — `{ user }` если залогинен.
 
-### Task API (требует cookie-сессии)
+### Доски / шаринг (требует cookie-сессии)
 
-- `GET    /api/tasks`                 → `{ tasks: [...] }`, отсортированы по `position ASC`.
-- `POST   /api/tasks`                 — создать.
-- `PATCH  /api/tasks/{id}`            — частичное обновление (любое подмножество полей).
+Задача принадлежит **доске** (пространству), а не пользователю напрямую. Доступ — через членство
+в доске (`board_members`). Любой участник имеет полный доступ к задачам; управлять доской
+(переименовать, удалить, добавлять/убирать участников) может только владелец.
+
+- `GET    /api/boards`                       → `{ boards: [...] }`, где юзер участник; у каждой `is_owner`.
+- `POST   /api/boards`                       — `{ name, color }` создать доску (создатель — владелец).
+- `PATCH  /api/boards/{bid}`                 — `{ name?, color?, position? }` (только владелец).
+- `DELETE /api/boards/{bid}`                 — удалить (только владелец; нельзя удалить последнюю доску).
+- `GET    /api/boards/{bid}/members`         → `{ members: [...] }`.
+- `POST   /api/boards/{bid}/members`         — `{ email }` добавить существующего юзера (только владелец).
+- `DELETE /api/boards/{bid}/members/{uid}`   — убрать участника (владелец — любого; участник — себя = «покинуть»).
+
+### Task API (всё под доской, требует членства в `{bid}`)
+
+- `GET    /api/boards/{bid}/tasks`                 → `{ tasks: [...] }`, отсортированы по `position ASC`.
+- `POST   /api/boards/{bid}/tasks`                 — создать.
+- `PATCH  /api/boards/{bid}/tasks/{id}`            — частичное обновление (любое подмножество полей).
   Поле `repeat` (`daily | weekly | monthly | yearly | ""`) делает задачу повторяющейся:
   `PATCH { done: true }` для неё не закрывает задачу, а переносит `due_at` на следующее
   наступление (строго в будущем; в БД колонка называется `recurrence` — `repeat` зарезервирован).
-- `DELETE /api/tasks/{id}`            — удалить.
-- `POST   /api/tasks/{id}/reorder`    — `{ before?: id, after?: id }`, серверный пересчёт `position`.
-- `POST   /api/tasks/sync`            — `{ since?, changes: [{ op: upsert|delete, id?, task? }] }` → `{ server_changes, server_time, conflicts }`. LWW по `updated_at`.
+- `DELETE /api/boards/{bid}/tasks/{id}`            — удалить.
+- `POST   /api/boards/{bid}/tasks/{id}/reorder`    — `{ before?: id, after?: id }`, серверный пересчёт `position`.
+- `POST   /api/boards/{bid}/tasks/sync`            — `{ since?, changes: [{ op: upsert|delete, id?, task? }] }` → `{ server_changes, server_time, conflicts }`. LWW по `updated_at`.
 
 ## Деплой
 

@@ -572,3 +572,125 @@ body > * { position: relative; z-index: 1; }
   font-size: 13px;
   color: var(--ink-soft);
 }
+
+/* ── Board switcher ─────────────────────────────────────────── */
+
+.board-switch { position: relative; margin-left: 10px; }
+.board-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.board-btn:hover { background: var(--surface); }
+.board-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+/* цвет даёт класс sw-* (объявлен выше); фолбэк — только если его нет */
+.board-dot:not([class*="sw-"]) { background: var(--accent-indigo); }
+.board-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.board-menu {
+  position: absolute;
+  top: 44px;
+  left: 0;
+  min-width: 240px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
+  z-index: 30;
+}
+.board-list { display: flex; flex-direction: column; gap: 2px; }
+.board-menu-item {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+}
+.board-menu-item:hover { background: var(--surface-2); }
+.board-menu-danger { color: var(--danger); }
+.board-menu-divider { height: 1px; background: var(--border); margin: 8px 0; }
+.board-item.active { background: var(--surface-2); font-weight: 600; }
+.board-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-item-shared {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+.board-owner-actions { display: flex; flex-direction: column; gap: 2px; }
+
+/* ── Share modal: members ───────────────────────────────────── */
+
+.member-list { display: flex; flex-direction: column; gap: 6px; }
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+}
+.member-ava {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  flex: none;
+}
+.member-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.member-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.member-email { font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-badge {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  font-weight: 500;
+}
+.member-remove {
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  flex: none;
+}
+.member-remove:hover { background: var(--surface-2); color: var(--danger); }
+.share-error {
+  background: rgba(196, 62, 47, 0.08);
+  color: var(--danger);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-top: 8px;
+}

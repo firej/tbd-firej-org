@@ -130,6 +130,10 @@ func (h *Handler) Signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid, _ := res.LastInsertId()
+	if err := h.createDefaultBoard(uid); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "board init error")
+		return
+	}
 	if err := h.setUserID(w, r, uid); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "session error")
 		return

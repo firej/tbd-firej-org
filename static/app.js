@@ -13,9 +13,12 @@
   'use strict';
 
   // ── константы ─────────────────────────────────────────────
-  const TASKS_KEY   = 'tbd.tasks.v1';
-  const PENDING_KEY = 'tbd.pending.v1';
-  const LAST_SYNC_KEY = 'tbd.lastSync.v1';
+  // Кэш задач и времени последнего синка — пер-доска (ключ + boardId).
+  const TASKS_PREFIX     = 'tbd.tasks.v1.';
+  const LAST_SYNC_PREFIX = 'tbd.lastSync.v1.';
+  const PENDING_KEY       = 'tbd.pending.v1';      // одна очередь; в actions хранится полный path с boardId
+  const BOARDS_KEY        = 'tbd.boards.v1';        // кэш списка досок
+  const CURRENT_BOARD_KEY = 'tbd.currentBoard.v1';  // id выбранной доски
   const THEME_KEY   = 'theme';
 
   const HOUR = 3600_000;
@@ -34,7 +37,9 @@
   const REPEAT_MS = { daily: DAY, weekly: DAY * 7, monthly: DAY * 30, yearly: DAY * 365 };
 
   // ── состояние ─────────────────────────────────────────────
-  let tasks = loadCache();
+  let boards = loadBoardsCache();
+  let currentBoardId = localStorage.getItem(CURRENT_BOARD_KEY) || (boards[0] && boards[0].id) || null;
+  let tasks = currentBoardId ? loadCache(currentBoardId) : [];
   let pending = loadPending();
   let editingId = null;     // id задачи, редактируемой в модалке (или null)
   let createAtEnd = false;  // true — модалка открыта с плюс-плитки, новая задача встаёт в конец
@@ -53,13 +58,23 @@
     });
   }
 
-  function loadCache() {
-    try { return JSON.parse(localStorage.getItem(TASKS_KEY) || '[]'); }
+  function tasksKey(bid) { return TASKS_PREFIX + bid; }
+  function loadCache(bid) {
+    try { return JSON.parse(localStorage.getItem(tasksKey(bid)) || '[]'); }
     catch (e) { return []; }
   }
   function saveCache() {
-    localStorage.setItem(TASKS_KEY, JSON.stringify(tasks));
+    if (currentBoardId) localStorage.setItem(tasksKey(currentBoardId), JSON.stringify(tasks));
   }
+  function loadBoardsCache() {
+    try { return JSON.parse(localStorage.getItem(BOARDS_KEY) || '[]'); }
+    catch (e) { return []; }
+  }
+  function saveBoardsCache() {
+    localStorage.setItem(BOARDS_KEY, JSON.stringify(boards));
+  }
+  // Полный путь к API текущей доски: boardPath('/tasks'), boardPath('/tasks/'+id) и т.п.
+  function boardPath(suffix) { return '/api/boards/' + currentBoardId + (suffix || ''); }
   function loadPending() {
     try { return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]'); }
     catch (e) { return []; }
@@ -158,17 +173,21 @@
   // ── initial pull ──────────────────────────────────────────
   async function pullAll() {
     if (!navigator.onLine) { setSyncState('offline'); return; }
+    if (!currentBoardId) return;
     // Не пуллим, пока есть оптимистично созданные задачи (tmp_*) или незавершённые POST'ы —
     // иначе перетрём то, что ещё не сохранилось на сервере.
     if (inFlightCreates > 0) return;
     if (tasks.some(t => typeof t.id === 'string' && t.id.indexOf('tmp_') === 0)) return;
 
+    const bid = currentBoardId;
     setSyncState('syncing');
     try {
-      const data = await api('/api/tasks');
+      const data = await api(boardPath('/tasks'));
+      // доска могла смениться, пока шёл запрос — не перетираем чужой кэш
+      if (bid !== currentBoardId) return;
       tasks = data.tasks || [];
       saveCache();
-      localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
+      localStorage.setItem(LAST_SYNC_PREFIX + bid, new Date().toISOString());
       setSyncState('synced');
       renderAll();
       initSortable();
@@ -425,7 +444,7 @@
           const body = {};
           if (safeAfter)  body.before = safeAfter;  // встаём ПЕРЕД таском с id=afterId
           if (safeBefore) body.after  = safeBefore; // и ПОСЛЕ таска с id=beforeId
-          const data = await api('/api/tasks/' + id + '/reorder', {
+          const data = await api(boardPath('/tasks/' + id + '/reorder'), {
             method: 'POST', body: JSON.stringify(body),
           });
           if (data && data.task) {
@@ -436,7 +455,7 @@
           setSyncState('synced');
         } catch (err) {
           // в очередь — повторим позже
-          enqueue({ method: 'POST', path: '/api/tasks/' + id + '/reorder',
+          enqueue({ method: 'POST', path: boardPath('/tasks/' + id + '/reorder'),
                     body: { before: safeAfter, after: safeBefore } });
           setSyncState(navigator.onLine ? 'error' : 'offline');
         }
@@ -470,7 +489,7 @@
     inFlightCreates++;
     try {
       setSyncState('syncing');
-      const data = await api('/api/tasks', {
+      const data = await api(boardPath('/tasks'), {
         method: 'POST',
         body: JSON.stringify({
           title: payload.title, note: payload.note,
@@ -537,7 +556,7 @@
 
     try {
       setSyncState('syncing');
-      const data = await api('/api/tasks/' + id, {
+      const data = await api(boardPath('/tasks/' + id), {
         method: 'PATCH', body: JSON.stringify({ done: true }),
       });
       if (data && data.task) {
@@ -546,7 +565,7 @@
       }
       setSyncState('synced');
     } catch (err) {
-      enqueue({ method: 'PATCH', path: '/api/tasks/' + id, body: { done: true } });
+      enqueue({ method: 'PATCH', path: boardPath('/tasks/' + id), body: { done: true } });
       setSyncState(navigator.onLine ? 'error' : 'offline');
     }
   }
@@ -563,7 +582,7 @@
 
     try {
       setSyncState('syncing');
-      const data = await api('/api/tasks/' + id, {
+      const data = await api(boardPath('/tasks/' + id), {
         method: 'PATCH', body: JSON.stringify(patch),
       });
       if (data && data.task) {
@@ -572,7 +591,7 @@
       }
       setSyncState('synced');
     } catch (err) {
-      enqueue({ method: 'PATCH', path: '/api/tasks/' + id, body: patch });
+      enqueue({ method: 'PATCH', path: boardPath('/tasks/' + id), body: patch });
       setSyncState(navigator.onLine ? 'error' : 'offline');
     }
   }
@@ -589,12 +608,279 @@
 
     try {
       setSyncState('syncing');
-      await api('/api/tasks/' + id, { method: 'DELETE' });
+      await api(boardPath('/tasks/' + id), { method: 'DELETE' });
       setSyncState('synced');
     } catch (err) {
-      enqueue({ method: 'DELETE', path: '/api/tasks/' + id });
+      enqueue({ method: 'DELETE', path: boardPath('/tasks/' + id) });
       setSyncState(navigator.onLine ? 'error' : 'offline');
     }
+  }
+
+  // ── доски (пространства) + шаринг ─────────────────────────
+  let meId = null; // id текущего пользователя (для «покинуть доску»); тянем в boot
+
+  function currentBoard() {
+    return boards.find(b => b.id === currentBoardId) || null;
+  }
+
+  // Шапка-переключатель: имя и цветовая точка текущей доски.
+  function renderBoardHeader() {
+    const b = currentBoard();
+    const nameEl = document.getElementById('board-name');
+    const dotEl  = document.getElementById('board-dot');
+    if (nameEl) nameEl.textContent = b ? b.name : 'Доска';
+    if (dotEl)  dotEl.className = 'board-dot' + (b ? ' sw-' + b.color : '');
+  }
+
+  // Выпадающее меню со списком досок + действиями.
+  function renderBoardMenu() {
+    const list = document.getElementById('board-list');
+    if (!list) return;
+    list.innerHTML = boards.map(b => (
+      '<button type="button" class="board-menu-item board-item' +
+        (b.id === currentBoardId ? ' active' : '') + '" data-bid="' + b.id + '">' +
+        '<span class="board-dot sw-' + b.color + '"></span>' +
+        '<span class="board-item-name">' + escapeHtml(b.name) + '</span>' +
+        (b.is_owner ? '' : '<span class="board-item-shared" title="Общая доска">общая</span>') +
+      '</button>'
+    )).join('');
+
+    const b = currentBoard();
+    const owner = b && b.is_owner;
+    document.getElementById('board-owner-actions').hidden = !owner;
+    document.getElementById('board-leave').hidden = !(b && !owner);
+  }
+
+  // Полная перерисовка всего, что зависит от текущей доски.
+  function renderBoardUI() {
+    renderBoardHeader();
+    renderBoardMenu();
+  }
+
+  async function loadBoards() {
+    if (!navigator.onLine) return;
+    try {
+      const data = await api('/api/boards');
+      boards = data.boards || [];
+      saveBoardsCache();
+      // если текущая доска пропала из списка (удалена/покинута) — берём первую
+      if (!currentBoardId || !boards.some(b => b.id === currentBoardId)) {
+        currentBoardId = boards.length ? boards[0].id : null;
+        if (currentBoardId) localStorage.setItem(CURRENT_BOARD_KEY, currentBoardId);
+        tasks = currentBoardId ? loadCache(currentBoardId) : [];
+      }
+      renderBoardUI();
+    } catch (err) {
+      console.warn('loadBoards failed', err);
+    }
+  }
+
+  function switchBoard(bid) {
+    if (bid === currentBoardId) { closeBoardMenu(); return; }
+    currentBoardId = bid;
+    localStorage.setItem(CURRENT_BOARD_KEY, bid);
+    tasks = loadCache(bid);
+    closeBoardMenu();
+    renderBoardUI();
+    renderAll();
+    initSortable();
+    flushPending().then(pullAll);
+  }
+
+  async function createBoard(name, color) {
+    try {
+      setSyncState('syncing');
+      const data = await api('/api/boards', {
+        method: 'POST', body: JSON.stringify({ name: name, color: color }),
+      });
+      if (data && data.board) {
+        boards.push(data.board);
+        saveBoardsCache();
+        switchBoard(data.board.id);
+      }
+      setSyncState('synced');
+    } catch (err) {
+      alert('Не удалось создать доску: ' + err.message);
+      setSyncState(navigator.onLine ? 'error' : 'offline');
+    }
+  }
+
+  async function updateBoard(name, color) {
+    const b = currentBoard();
+    if (!b) return;
+    try {
+      setSyncState('syncing');
+      const data = await api('/api/boards/' + b.id, {
+        method: 'PATCH', body: JSON.stringify({ name: name, color: color }),
+      });
+      if (data && data.board) {
+        const i = boards.findIndex(x => x.id === b.id);
+        if (i >= 0) boards[i] = data.board;
+        saveBoardsCache();
+        renderBoardUI();
+      }
+      setSyncState('synced');
+    } catch (err) {
+      alert('Не удалось изменить доску: ' + err.message);
+      setSyncState(navigator.onLine ? 'error' : 'offline');
+    }
+  }
+
+  async function deleteBoard() {
+    const b = currentBoard();
+    if (!b) return;
+    if (!confirm('Удалить доску «' + b.name + '» со всеми задачами? Это действие необратимо.')) return;
+    try {
+      setSyncState('syncing');
+      await api('/api/boards/' + b.id, { method: 'DELETE' });
+      localStorage.removeItem(tasksKey(b.id));
+      boards = boards.filter(x => x.id !== b.id);
+      saveBoardsCache();
+      currentBoardId = boards.length ? boards[0].id : null;
+      if (currentBoardId) localStorage.setItem(CURRENT_BOARD_KEY, currentBoardId);
+      tasks = currentBoardId ? loadCache(currentBoardId) : [];
+      closeBoardMenu();
+      renderBoardUI();
+      renderAll();
+      initSortable();
+      setSyncState('synced');
+      pullAll();
+    } catch (err) {
+      alert('Не удалось удалить доску: ' + err.message);
+      setSyncState(navigator.onLine ? 'error' : 'offline');
+    }
+  }
+
+  async function leaveBoard() {
+    const b = currentBoard();
+    if (!b || meId == null) return;
+    if (!confirm('Покинуть доску «' + b.name + '»? Она исчезнет из вашего списка.')) return;
+    try {
+      setSyncState('syncing');
+      await api('/api/boards/' + b.id + '/members/' + meId, { method: 'DELETE' });
+      localStorage.removeItem(tasksKey(b.id));
+      boards = boards.filter(x => x.id !== b.id);
+      saveBoardsCache();
+      currentBoardId = boards.length ? boards[0].id : null;
+      if (currentBoardId) localStorage.setItem(CURRENT_BOARD_KEY, currentBoardId);
+      tasks = currentBoardId ? loadCache(currentBoardId) : [];
+      closeBoardMenu();
+      renderBoardUI();
+      renderAll();
+      initSortable();
+      setSyncState('synced');
+      pullAll();
+    } catch (err) {
+      alert('Не удалось покинуть доску: ' + err.message);
+      setSyncState(navigator.onLine ? 'error' : 'offline');
+    }
+  }
+
+  // ── шаринг: участники доски ───────────────────────────────
+  function renderMembers(members) {
+    const wrap = document.getElementById('member-list');
+    const b = currentBoard();
+    const canManage = b && b.is_owner;
+    wrap.innerHTML = members.map(m => (
+      '<div class="member-row">' +
+        '<span class="member-ava sw-' + (m.avatar_color || 'indigo') + '">' +
+          escapeHtml(initialsOf(m.display_name)) + '</span>' +
+        '<span class="member-meta">' +
+          '<span class="member-name">' + escapeHtml(m.display_name) +
+            (m.is_owner ? ' <span class="member-badge">владелец</span>' : '') + '</span>' +
+          '<span class="member-email">' + escapeHtml(m.email) + '</span>' +
+        '</span>' +
+        (canManage && !m.is_owner
+          ? '<button type="button" class="member-remove" data-uid="' + m.user_id + '" title="Убрать">✕</button>'
+          : '') +
+      '</div>'
+    )).join('');
+  }
+
+  function initialsOf(name) {
+    const parts = (name || '').trim().split(/\s+/).slice(0, 2);
+    return parts.map(p => p[0] || '').join('').toUpperCase();
+  }
+
+  async function loadMembers() {
+    const b = currentBoard();
+    if (!b) return;
+    try {
+      const data = await api('/api/boards/' + b.id + '/members');
+      renderMembers(data.members || []);
+    } catch (err) {
+      renderMembers([]);
+    }
+  }
+
+  async function addMember(email) {
+    const b = currentBoard();
+    if (!b) return;
+    const errEl = document.getElementById('share-error');
+    errEl.hidden = true;
+    try {
+      await api('/api/boards/' + b.id + '/members', {
+        method: 'POST', body: JSON.stringify({ email: email }),
+      });
+      document.getElementById('share-email').value = '';
+      loadMembers();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    }
+  }
+
+  async function removeMember(uid) {
+    const b = currentBoard();
+    if (!b) return;
+    try {
+      await api('/api/boards/' + b.id + '/members/' + uid, { method: 'DELETE' });
+      loadMembers();
+    } catch (err) {
+      const errEl = document.getElementById('share-error');
+      errEl.textContent = err.message; errEl.hidden = false;
+    }
+  }
+
+  // ── меню досок и модалки доски/шаринга ────────────────────
+  let boardModalMode = 'create'; // create | rename
+  let boardModalColor = 'indigo';
+
+  function openBoardMenu() {
+    renderBoardMenu();
+    document.getElementById('board-menu').hidden = false;
+  }
+  function closeBoardMenu() {
+    const m = document.getElementById('board-menu');
+    if (m) m.hidden = true;
+  }
+
+  function setBoardModalColor(c) {
+    boardModalColor = c;
+    document.querySelectorAll('#board-f-colors .sw').forEach(x =>
+      x.classList.toggle('selected', x.dataset.v === c));
+  }
+
+  function openBoardModal(mode) {
+    boardModalMode = mode;
+    const b = currentBoard();
+    document.getElementById('board-modal-title').textContent =
+      mode === 'rename' ? 'Переименовать доску' : 'Новая доска';
+    const nameInput = document.getElementById('board-f-name');
+    nameInput.value = mode === 'rename' && b ? b.name : '';
+    setBoardModalColor(mode === 'rename' && b ? b.color : 'indigo');
+    document.getElementById('board-modal').showModal();
+    setTimeout(() => nameInput.focus(), 30);
+  }
+  function closeBoardModal() {
+    document.getElementById('board-modal').close();
+  }
+
+  function openShareModal() {
+    document.getElementById('share-error').hidden = true;
+    document.getElementById('share-email').value = '';
+    document.getElementById('share-modal').showModal();
+    loadMembers();
   }
 
   // ── режим дашборда: полный экран + не гасить подсветку ────
@@ -830,11 +1116,73 @@
     });
     document.getElementById('logout-btn').addEventListener('click', async () => {
       try { await fetch('/auth/logout', { method: 'POST' }); } catch (e) {}
-      // вычищаем локальный кэш — на следующий вход подтянется свежее
-      localStorage.removeItem(TASKS_KEY);
-      localStorage.removeItem(PENDING_KEY);
-      localStorage.removeItem(LAST_SYNC_KEY);
+      // вычищаем весь локальный кэш tbd.* — на следующий вход подтянется свежее
+      Object.keys(localStorage)
+        .filter(k => k.indexOf('tbd.') === 0)
+        .forEach(k => localStorage.removeItem(k));
       window.location.href = '/login';
+    });
+
+    // ── переключатель досок ──────────────────────────────────
+    const boardBtn = document.getElementById('board-btn');
+    const boardMenu = document.getElementById('board-menu');
+    boardBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (boardMenu.hidden) openBoardMenu(); else closeBoardMenu();
+    });
+    document.addEventListener('click', (e) => {
+      if (!boardMenu.hidden && !boardMenu.contains(e.target) && e.target !== boardBtn) {
+        closeBoardMenu();
+      }
+    });
+    document.getElementById('board-list').addEventListener('click', (e) => {
+      const item = e.target.closest('.board-item');
+      if (item) switchBoard(item.dataset.bid);
+    });
+    document.getElementById('board-new').addEventListener('click', () => {
+      closeBoardMenu(); openBoardModal('create');
+    });
+    document.getElementById('board-rename').addEventListener('click', () => {
+      closeBoardMenu(); openBoardModal('rename');
+    });
+    document.getElementById('board-share').addEventListener('click', () => {
+      closeBoardMenu(); openShareModal();
+    });
+    document.getElementById('board-delete').addEventListener('click', () => {
+      closeBoardMenu(); deleteBoard();
+    });
+    document.getElementById('board-leave').addEventListener('click', () => {
+      closeBoardMenu(); leaveBoard();
+    });
+
+    // ── модалка доски (создание / переименование) ────────────
+    document.querySelectorAll('#board-f-colors .sw').forEach(el => {
+      el.addEventListener('click', () => setBoardModalColor(el.dataset.v));
+    });
+    document.getElementById('board-modal-close').addEventListener('click', closeBoardModal);
+    document.getElementById('board-modal-cancel').addEventListener('click', closeBoardModal);
+    document.getElementById('board-modal').addEventListener('cancel', (e) => { e.preventDefault(); closeBoardModal(); });
+    document.getElementById('board-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const name = document.getElementById('board-f-name').value.trim();
+      if (!name) { document.getElementById('board-f-name').focus(); return; }
+      if (boardModalMode === 'rename') updateBoard(name, boardModalColor);
+      else                            createBoard(name, boardModalColor);
+      closeBoardModal();
+    });
+
+    // ── шаринг ────────────────────────────────────────────────
+    document.getElementById('share-close').addEventListener('click', () => document.getElementById('share-modal').close());
+    document.getElementById('share-done').addEventListener('click', () => document.getElementById('share-modal').close());
+    document.getElementById('share-modal').addEventListener('cancel', (e) => { e.preventDefault(); document.getElementById('share-modal').close(); });
+    document.getElementById('share-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = document.getElementById('share-email').value.trim();
+      if (email) addMember(email);
+    });
+    document.getElementById('member-list').addEventListener('click', (e) => {
+      const btn = e.target.closest('.member-remove');
+      if (btn) removeMember(btn.dataset.uid);
     });
 
     // search
@@ -944,10 +1292,14 @@
   // ── boot ──────────────────────────────────────────────────
   function boot() {
     setSyncState(navigator.onLine ? 'synced' : 'offline');
+    renderBoardUI();
     renderAll();
     initSortable();
     wireEvents();
-    flushPending().then(pullAll);
+    // узнаём свой id (для «покинуть доску»)
+    api('/auth/me').then(d => { if (d && d.user) meId = d.user.id; }).catch(() => {});
+    // тянем список досок, затем задачи текущей
+    loadBoards().then(() => flushPending()).then(pullAll);
   }
 
   document.addEventListener('DOMContentLoaded', boot);

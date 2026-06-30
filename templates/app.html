@@ -23,6 +23,25 @@
       <span class="brand-text">tobedone</span>
     </div>
 
+    <div class="board-switch">
+      <button id="board-btn" class="board-btn" type="button" aria-haspopup="true">
+        <span class="board-dot" id="board-dot"></span>
+        <span class="board-name" id="board-name">Доска</span>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6l4 4 4-4"/></svg>
+      </button>
+      <div id="board-menu" class="board-menu" hidden>
+        <div class="board-list" id="board-list"></div>
+        <div class="board-menu-divider"></div>
+        <button type="button" class="board-menu-item" id="board-new">＋ Новая доска</button>
+        <div class="board-owner-actions" id="board-owner-actions" hidden>
+          <button type="button" class="board-menu-item" id="board-share">Поделиться…</button>
+          <button type="button" class="board-menu-item" id="board-rename">Переименовать</button>
+          <button type="button" class="board-menu-item board-menu-danger" id="board-delete">Удалить доску</button>
+        </div>
+        <button type="button" class="board-menu-item board-menu-danger" id="board-leave" hidden>Покинуть доску</button>
+      </div>
+    </div>
+
     <div class="topbar-spacer"></div>
 
     <div class="search" role="search">
@@ -145,6 +164,68 @@
         <div style="flex:1"></div>
         <button type="button" class="btn" id="modal-cancel">Отмена</button>
         <button type="submit" class="btn btn-primary" id="modal-save">Сохранить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Шаринг доски -->
+  <dialog id="share-modal" class="task-modal">
+    <div class="modal-head">
+      <h2>Поделиться доской</h2>
+      <button type="button" class="modal-close" id="share-close" aria-label="Закрыть">✕</button>
+    </div>
+
+    <div class="field">
+      <span>Участники</span>
+      <div class="member-list" id="member-list"></div>
+    </div>
+
+    <form id="share-form">
+      <div class="field">
+        <span>Добавить по email</span>
+        <div class="field-row" style="align-items:flex-end">
+          <input type="email" id="share-email" placeholder="user@example.com" autocomplete="off" style="flex:1"/>
+          <button type="submit" class="btn btn-primary" id="share-add">Добавить</button>
+        </div>
+      </div>
+      <div class="share-error" id="share-error" hidden></div>
+    </form>
+
+    <div class="modal-footer">
+      <div style="flex:1"></div>
+      <button type="button" class="btn" id="share-done">Готово</button>
+    </div>
+  </dialog>
+
+  <!-- Создание / переименование доски -->
+  <dialog id="board-modal" class="task-modal">
+    <form id="board-form" method="dialog">
+      <div class="modal-head">
+        <h2 id="board-modal-title">Новая доска</h2>
+        <button type="button" class="modal-close" id="board-modal-close" aria-label="Закрыть">✕</button>
+      </div>
+
+      <label class="field">
+        <span>Название</span>
+        <input id="board-f-name" required maxlength="120" autocomplete="off" placeholder="Работа / Дом / Семья…"/>
+      </label>
+
+      <div class="field">
+        <span>Цвет</span>
+        <div class="swatches" id="board-f-colors">
+          <button type="button" data-v="terra"   class="sw sw-terra"></button>
+          <button type="button" data-v="indigo"  class="sw sw-indigo"></button>
+          <button type="button" data-v="olive"   class="sw sw-olive"></button>
+          <button type="button" data-v="mustard" class="sw sw-mustard"></button>
+          <button type="button" data-v="rose"    class="sw sw-rose"></button>
+          <button type="button" data-v="clay"    class="sw sw-clay"></button>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <div style="flex:1"></div>
+        <button type="button" class="btn" id="board-modal-cancel">Отмена</button>
+        <button type="submit" class="btn btn-primary" id="board-modal-save">Сохранить</button>
       </div>
     </form>
   </dialog>

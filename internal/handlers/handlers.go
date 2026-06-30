@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/evbogdanov/tobedone/internal/models"
+	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
 )
 
@@ -102,6 +103,43 @@ func (h *Handler) RequireAuthAPI(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := h.userID(r); !ok {
 			writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ── board access ───────────────────────────────────────────────────
+
+// isMember — состоит ли пользователь в доске (владелец тоже строка в board_members).
+func (h *Handler) isMember(uid int64, boardID string) bool {
+	var x int
+	err := h.db.QueryRow(
+		"SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ?", boardID, uid,
+	).Scan(&x)
+	return err == nil
+}
+
+// isOwner — владелец ли пользователь доски.
+func (h *Handler) isOwner(uid int64, boardID string) bool {
+	var x int
+	err := h.db.QueryRow(
+		"SELECT 1 FROM boards WHERE id = ? AND owner_id = ?", boardID, uid,
+	).Scan(&x)
+	return err == nil
+}
+
+// RequireMember — проверяет, что текущий юзер состоит в доске {bid}.
+func (h *Handler) RequireMember(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uid, ok := h.userID(r)
+		if !ok {
+			writeJSONError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		bid := mux.Vars(r)["bid"]
+		if bid == "" || !h.isMember(uid, bid) {
+			writeJSONError(w, http.StatusForbidden, "forbidden")
 			return
 		}
 		next.ServeHTTP(w, r)
