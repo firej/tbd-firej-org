@@ -275,13 +275,40 @@ body > * { position: relative; z-index: 1; }
   color: #fffaf0;
   cursor: grab;
   user-select: none;
-  transition: transform 220ms cubic-bezier(.2,.7,.3,1.4), box-shadow 200ms, opacity 200ms;
+  /* transform не транзитим: им управляют SortableJS (drag) и FLIP (пересортировка) */
+  transition: box-shadow 200ms, opacity 200ms;
 }
 .tile:active { cursor: grabbing; }
-.tile.dragging, .tile.sortable-ghost {
-  opacity: 0.6;
-}
+.tile.dragging { opacity: 0.6; }
+/* призрак-плейсхолдер на месте будущего drop'а */
+.tile.sortable-ghost { opacity: 0.35; }
 .tile.sortable-chosen { box-shadow: var(--shadow-lg); }
+/* клон, летящий за пальцем/курсором (forceFallback) */
+.tile.sortable-fallback {
+  opacity: 0.92 !important;
+  transform: scale(1.04) rotate(1.2deg);
+  box-shadow: var(--shadow-lg);
+  transition: none;
+  cursor: grabbing;
+}
+
+/* FLIP: плавный переезд плиток при пересортировке и удалении
+   (и .tile, и плюс-плитка) */
+.tile-grid .tile-flip { transition: transform 420ms cubic-bezier(.22,.61,.24,1); }
+
+/* исчезновение карточек, выполненных больше недели назад */
+.tile.tile-expire {
+  animation: tile-expire 600ms ease forwards;
+  pointer-events: none;
+}
+/* исчезновение удаляемой карточки — то же, но короче */
+.tile.tile-remove {
+  animation: tile-expire 280ms ease forwards;
+  pointer-events: none;
+}
+@keyframes tile-expire {
+  to { opacity: 0; transform: scale(0.7); }
+}
 
 .tile-bg-terra   { background: var(--accent-terra); }
 .tile-bg-indigo  { background: var(--accent-indigo); }

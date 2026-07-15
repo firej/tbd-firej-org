@@ -36,6 +36,11 @@
   // приблизительная длина периода — только для расчёта "жара" плитки
   const REPEAT_MS = { daily: DAY, weekly: DAY * 7, monthly: DAY * 30, yearly: DAY * 365 };
 
+  // выполненная карточка уезжает вниз не сразу — даём время передумать
+  const SINK_DELAY_MS = 3000;
+  // выполненные дольше этого срока удаляются при заходе на страницу
+  const DONE_TTL_MS = DAY * 7;
+
   // ── состояние ─────────────────────────────────────────────
   let boards = loadBoardsCache();
   let currentBoardId = localStorage.getItem(CURRENT_BOARD_KEY) || (boards[0] && boards[0].id) || null;
@@ -324,7 +329,14 @@
 
   function getFiltered() {
     const q = (document.getElementById('search').value || '').toLowerCase().trim();
-    let list = tasks.slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+    // выполненные — вниз; свежеотмеченные (в sinkGrace) пока считаем
+    // невыполненными, чтобы карточка не уезжала мгновенно
+    let list = tasks.slice().sort((a, b) => {
+      const ad = (a.done && !sinkGrace.has(a.id)) ? 1 : 0;
+      const bd = (b.done && !sinkGrace.has(b.id)) ? 1 : 0;
+      if (ad !== bd) return ad - bd;
+      return (a.position || 0) - (b.position || 0);
+    });
     if (q) {
       list = list.filter(t =>
         (t.title || '').toLowerCase().indexOf(q) >= 0 ||
@@ -379,17 +391,106 @@
     });
   }
 
+  // ── FLIP: плавный переезд плиток при пересортировке ───────
+  // Плюс-плитка тоже участвует (ключ '__add'), чтобы не прыгала.
+  function captureTileRects() {
+    const rects = new Map();
+    document.querySelectorAll('#tiles .tile, #tiles .tile-add').forEach(el => {
+      rects.set(el.dataset.id || '__add', el.getBoundingClientRect());
+    });
+    return rects;
+  }
+
+  function playFlip(before) {
+    document.querySelectorAll('#tiles .tile, #tiles .tile-add').forEach(el => {
+      const b = before.get(el.dataset.id || '__add');
+      if (!b) return;
+      const a = el.getBoundingClientRect();
+      const dx = b.left - a.left, dy = b.top - a.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+      el.style.transition = 'none';
+      el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      void el.offsetWidth; // reflow — фиксируем стартовую позицию
+      el.classList.add('tile-flip');
+      el.style.transition = '';
+      el.style.transform = '';
+      setTimeout(() => el.classList.remove('tile-flip'), 480);
+    });
+  }
+
+  function flipRerender() {
+    const before = captureTileRects();
+    renderAll();
+    initSortable();
+    playFlip(before);
+  }
+
+  // ── отложенное "утопление" выполненных карточек ────────────
+  const sinkGrace = new Map(); // id → таймер; пока карточка тут — вниз не уезжает
+
+  function scheduleSink(id) {
+    clearTimeout(sinkGrace.get(id));
+    sinkGrace.set(id, setTimeout(() => {
+      // не дёргаем сетку посреди drag'а — попробуем ещё раз позже
+      if (Sortable.active) { scheduleSink(id); return; }
+      sinkGrace.delete(id);
+      flipRerender();
+    }, SINK_DELAY_MS));
+  }
+
+  function cancelSink(id) {
+    if (!sinkGrace.has(id)) return;
+    clearTimeout(sinkGrace.get(id));
+    sinkGrace.delete(id);
+  }
+
+  // ── авточистка: выполнено больше недели назад — удаляем ────
+  function sweepExpiredDone() {
+    const now = Date.now();
+    const expired = tasks.filter(t => {
+      if (!t.done) return false;
+      const ts = Date.parse(t.completed_at || t.updated_at || '');
+      return ts && (now - ts > DONE_TTL_MS);
+    });
+    if (!expired.length) return;
+
+    const ids = new Set(expired.map(t => t.id));
+    let i = 0;
+    document.querySelectorAll('#tiles .tile').forEach(el => {
+      if (!ids.has(el.dataset.id)) return;
+      el.style.animationDelay = (i++ * 90) + 'ms';
+      el.classList.add('tile-expire');
+    });
+
+    // ждём конца анимаций исчезновения, затем убираем из кэша одним
+    // FLIP-рендером (соседи плавно съезжаются) и удаляем на сервере
+    setTimeout(() => {
+      const before = captureTileRects();
+      tasks = tasks.filter(t => !ids.has(t.id));
+      saveCache();
+      renderAll();
+      initSortable();
+      playFlip(before);
+      expired.forEach(t => deleteOnServer(t.id));
+    }, 620 + i * 90);
+  }
+
   // ── DnD ───────────────────────────────────────────────────
   let sortable = null;
   function initSortable() {
     const grid = document.getElementById('tiles');
     if (sortable) sortable.destroy();
     sortable = Sortable.create(grid, {
-      animation: 180,
+      animation: 320,
+      easing: 'cubic-bezier(.22,.61,.24,1)',
       ghostClass: 'sortable-ghost',
       chosenClass: 'sortable-chosen',
       forceFallback: true, // лучше на тач-устройствах
       fallbackTolerance: 4,
+      // в сетке из разноразмерных плиток свапаем только когда курсор реально
+      // заехал за край соседа — иначе большие плитки "дребезжат"
+      swapThreshold: 0.65,
+      invertSwap: true,
       delay: 100,           // долгий тап — драг (важно для мобилы, чтобы скролл работал)
       delayOnTouchOnly: true,
       draggable: '.tile',   // плюс-плитка не перетаскивается
@@ -573,7 +674,13 @@
   async function patchTask(id, patch) {
     const i = tasks.findIndex(x => x.id === id);
     if (i < 0) return;
-    Object.assign(tasks[i], patch, { updated_at: new Date().toISOString() });
+    // completed_at зеркалим локально (сервер проставляет сам, в body не шлём) —
+    // от него зависит недельная авточистка
+    const local = Object.assign({}, patch);
+    if (typeof patch.done === 'boolean') {
+      local.completed_at = patch.done ? new Date().toISOString() : null;
+    }
+    Object.assign(tasks[i], local, { updated_at: new Date().toISOString() });
     saveCache();
     renderAll();
     initSortable();
@@ -597,15 +704,26 @@
   }
 
   async function deleteTask(id) {
-    const i = tasks.findIndex(x => x.id === id);
+    if (!tasks.some(x => x.id === id)) return;
+    cancelSink(id);
+
+    // сначала исчезает сама карточка, потом соседи FLIP'ом съезжаются на её место
+    const el = document.querySelector('#tiles .tile[data-id="' + id + '"]');
+    if (el) {
+      el.classList.add('tile-remove');
+      await new Promise(r => setTimeout(r, 300)); // длительность анимации tile-remove
+    }
+
+    const i = tasks.findIndex(x => x.id === id); // индекс мог сдвинуться за время анимации
     if (i < 0) return;
     tasks.splice(i, 1);
     saveCache();
-    renderAll();
-    initSortable();
+    flipRerender();
+    await deleteOnServer(id);
+  }
 
+  async function deleteOnServer(id) {
     if (id.indexOf('tmp_') === 0) return;
-
     try {
       setSyncState('syncing');
       await api(boardPath('/tasks/' + id), { method: 'DELETE' });
@@ -729,7 +847,7 @@
     renderBoardUI();
     renderAll();
     initSortable();
-    flushPending().then(pullAll);
+    flushPending().then(pullAll).then(sweepExpiredDone);
   }
 
   async function createBoard(name, color) {
@@ -1274,7 +1392,16 @@
       if (act && act.dataset.act === 'toggle') {
         e.stopPropagation();
         if (t.repeat && !t.done) completeRecurring(t, tile);
-        else patchTask(id, { done: !t.done });
+        else {
+          const makingDone = !t.done;
+          if (makingDone) scheduleSink(id); // вниз уедет через SINK_DELAY_MS
+          else            cancelSink(id);
+          // рендер внутри patchTask синхронный — оборачиваем во FLIP,
+          // чтобы снятая галочка плавно возвращала карточку наверх
+          const before = captureTileRects();
+          patchTask(id, { done: makingDone });
+          playFlip(before);
+        }
         return;
       }
       if (act && act.dataset.act === 'del') {
@@ -1362,8 +1489,9 @@
     wireEvents();
     // узнаём свой id (для «покинуть доску»)
     api('/auth/me').then(d => { if (d && d.user) meId = d.user.id; }).catch(() => {});
-    // тянем список досок, затем задачи текущей
-    loadBoards().then(() => flushPending()).then(pullAll);
+    // тянем список досок, затем задачи текущей; после первого пулла —
+    // выметаем карточки, выполненные больше недели назад
+    loadBoards().then(() => flushPending()).then(pullAll).then(sweepExpiredDone);
   }
 
   document.addEventListener('DOMContentLoaded', boot);
