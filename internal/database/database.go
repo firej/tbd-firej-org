@@ -55,6 +55,7 @@ func InitDB(db *sql.DB) error {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			due_at DATETIME NULL,
 			completed_at DATETIME NULL,
+			deleted_at DATETIME NULL,
 			sub JSON NULL,
 			recurrence VARCHAR(16) NULL,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -72,6 +73,8 @@ func InitDB(db *sql.DB) error {
 	migrations := []string{
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS recurrence VARCHAR(16) NULL AFTER sub`,
 		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS board_id CHAR(36) NULL AFTER user_id`,
+		// мягкое удаление: карточка не стирается, а архивируется — на случай восстановления
+		`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS deleted_at DATETIME NULL AFTER completed_at`,
 	}
 	for _, m := range migrations {
 		if _, err := db.Exec(m); err != nil {

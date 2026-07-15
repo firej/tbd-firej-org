@@ -97,7 +97,7 @@ func nextOccurrence(due *time.Time, repeat string, now time.Time) time.Time {
 func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	bid := mux.Vars(r)["bid"]
 	rows, err := h.db.Query(
-		`SELECT `+taskSelectCols+` FROM tasks WHERE board_id = ? ORDER BY position ASC`, bid,
+		`SELECT `+taskSelectCols+` FROM tasks WHERE board_id = ? AND deleted_at IS NULL ORDER BY position ASC`, bid,
 	)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "db error")
@@ -160,7 +160,7 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		pos = *p.Position
 	} else {
 		var minPos sql.NullFloat64
-		_ = h.db.QueryRow("SELECT MIN(position) FROM tasks WHERE board_id = ?", bid).Scan(&minPos)
+		_ = h.db.QueryRow("SELECT MIN(position) FROM tasks WHERE board_id = ? AND deleted_at IS NULL", bid).Scan(&minPos)
 		if minPos.Valid {
 			pos = minPos.Float64 - 1024
 		} else {
@@ -203,7 +203,7 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getTask(bid, id string) (*models.Task, error) {
 	row := h.db.QueryRow(
-		`SELECT `+taskSelectCols+` FROM tasks WHERE board_id = ? AND id = ?`, bid, id,
+		`SELECT `+taskSelectCols+` FROM tasks WHERE board_id = ? AND id = ? AND deleted_at IS NULL`, bid, id,
 	)
 	return scanTask(row)
 }
@@ -317,7 +317,7 @@ func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	args = append(args, bid, id)
-	q := "UPDATE tasks SET " + strings.Join(sets, ", ") + " WHERE board_id = ? AND id = ?"
+	q := "UPDATE tasks SET " + strings.Join(sets, ", ") + " WHERE board_id = ? AND id = ? AND deleted_at IS NULL"
 	res, err := h.db.Exec(q, args...)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "update error")
@@ -338,10 +338,15 @@ func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
 
 // ── Delete ─────────────────────────────────────────────────────────
 
+// DeleteTask — мягкое удаление: строка остаётся в БД с deleted_at (архив),
+// чтобы карточку можно было восстановить (deleted_at = NULL).
 func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	bid := mux.Vars(r)["bid"]
 	id := mux.Vars(r)["id"]
-	res, err := h.db.Exec("DELETE FROM tasks WHERE board_id = ? AND id = ?", bid, id)
+	res, err := h.db.Exec(
+		"UPDATE tasks SET deleted_at = CURRENT_TIMESTAMP WHERE board_id = ? AND id = ? AND deleted_at IS NULL",
+		bid, id,
+	)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "delete error")
 		return
@@ -361,9 +366,12 @@ type reorderPayload struct {
 }
 
 // posOrErr возвращает позицию задачи или sql.ErrNoRows.
+// Архивные задачи якорями не считаются.
 func (h *Handler) posOf(bid, id string) (float64, error) {
 	var p float64
-	err := h.db.QueryRow("SELECT position FROM tasks WHERE board_id = ? AND id = ?", bid, id).Scan(&p)
+	err := h.db.QueryRow(
+		"SELECT position FROM tasks WHERE board_id = ? AND id = ? AND deleted_at IS NULL", bid, id,
+	).Scan(&p)
 	return p, err
 }
 
@@ -400,7 +408,7 @@ func (h *Handler) ReorderTask(w http.ResponseWriter, r *http.Request) {
 		}
 		var prevPos sql.NullFloat64
 		_ = h.db.QueryRow(
-			"SELECT MAX(position) FROM tasks WHERE board_id = ? AND position < ? AND id != ?",
+			"SELECT MAX(position) FROM tasks WHERE board_id = ? AND position < ? AND id != ? AND deleted_at IS NULL",
 			bid, b, id,
 		).Scan(&prevPos)
 		if prevPos.Valid {
@@ -416,7 +424,7 @@ func (h *Handler) ReorderTask(w http.ResponseWriter, r *http.Request) {
 		}
 		var nextPos sql.NullFloat64
 		_ = h.db.QueryRow(
-			"SELECT MIN(position) FROM tasks WHERE board_id = ? AND position > ? AND id != ?",
+			"SELECT MIN(position) FROM tasks WHERE board_id = ? AND position > ? AND id != ? AND deleted_at IS NULL",
 			bid, a, id,
 		).Scan(&nextPos)
 		if nextPos.Valid {
@@ -472,7 +480,11 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 		switch ch.Op {
 		case "delete":
 			if ch.ID != "" {
-				h.db.Exec("DELETE FROM tasks WHERE board_id = ? AND id = ?", bid, ch.ID)
+				// мягкое удаление — как и в DeleteTask
+				h.db.Exec(
+					"UPDATE tasks SET deleted_at = CURRENT_TIMESTAMP WHERE board_id = ? AND id = ? AND deleted_at IS NULL",
+					bid, ch.ID,
+				)
 			}
 		case "upsert":
 			if ch.Task == nil || ch.Task.ID == "" {
@@ -519,18 +531,21 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 2) Собираем серверные изменения с момента since.
+	// 2) Собираем серверные изменения с момента since. Живые — upsert,
+	// архивированные (deleted_at) при инкрементальном пулле — delete.
 	now := time.Now().UTC()
 	var rows *sql.Rows
 	var err error
 	if req.Since != nil {
 		rows, err = h.db.Query(
-			`SELECT `+taskSelectCols+` FROM tasks WHERE board_id = ? AND updated_at >= ? ORDER BY position ASC`,
+			`SELECT `+taskSelectCols+` FROM tasks
+			 WHERE board_id = ? AND updated_at >= ? AND deleted_at IS NULL ORDER BY position ASC`,
 			bid, *req.Since,
 		)
 	} else {
 		rows, err = h.db.Query(
-			`SELECT `+taskSelectCols+` FROM tasks WHERE board_id = ? ORDER BY position ASC`, bid,
+			`SELECT `+taskSelectCols+` FROM tasks
+			 WHERE board_id = ? AND deleted_at IS NULL ORDER BY position ASC`, bid,
 		)
 	}
 	if err != nil {
@@ -546,6 +561,22 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out.ServerChanges = append(out.ServerChanges, syncChange{Op: "upsert", Task: t})
+	}
+
+	if req.Since != nil {
+		delRows, err := h.db.Query(
+			`SELECT id FROM tasks WHERE board_id = ? AND deleted_at IS NOT NULL AND updated_at >= ?`,
+			bid, *req.Since,
+		)
+		if err == nil {
+			defer delRows.Close()
+			for delRows.Next() {
+				var id string
+				if delRows.Scan(&id) == nil {
+					out.ServerChanges = append(out.ServerChanges, syncChange{Op: "delete", ID: id})
+				}
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
