@@ -283,12 +283,15 @@ body > * { position: relative; z-index: 1; }
 /* призрак-плейсхолдер на месте будущего drop'а */
 .tile.sortable-ghost { opacity: 0.35; }
 .tile.sortable-chosen { box-shadow: var(--shadow-lg); }
-/* клон, летящий за пальцем/курсором (forceFallback) */
+/* Клон, летящий за пальцем/курсором (forceFallback).
+   ВАЖНО: никаких transform и переходов по transform — Sortable на каждом
+   mousemove читает текущую матрицу клона и дописывает в неё смещение;
+   посторонний масштаб или transition заставляют клон отставать от курсора. */
 .tile.sortable-fallback {
-  opacity: 0.92 !important;
-  transform: scale(1.04) rotate(1.2deg);
+  opacity: 0.95 !important;
   box-shadow: var(--shadow-lg);
-  transition: none;
+  transition: none !important;
+  animation: none !important;
   cursor: grabbing;
 }
 

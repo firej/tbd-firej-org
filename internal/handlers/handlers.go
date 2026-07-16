@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/evbogdanov/tobedone/internal/models"
 	"github.com/gorilla/mux"
@@ -19,9 +23,28 @@ type Handler struct {
 	templates *template.Template
 }
 
+// staticVersion — версия статики для cache-busting: максимальный mtime
+// файлов в static/. Меняется при деплое → URL вида /static/app.js?v=...
+// обновляется, и браузеры не сидят на закэшированных старых файлах.
+func staticVersion() string {
+	var latest time.Time
+	_ = filepath.Walk("static", func(_ string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() && info.ModTime().After(latest) {
+			latest = info.ModTime()
+		}
+		return nil
+	})
+	if latest.IsZero() {
+		return "1"
+	}
+	return strconv.FormatInt(latest.Unix(), 10)
+}
+
 func New(db *sql.DB, store *sessions.CookieStore) *Handler {
+	assetV := staticVersion()
 	funcMap := template.FuncMap{
-		"upper": strings.ToUpper,
+		"assetV": func() string { return assetV },
+		"upper":  strings.ToUpper,
 		"initials": func(name string) string {
 			parts := strings.Fields(name)
 			out := ""

@@ -14,6 +14,13 @@ import (
 	"github.com/gorilla/sessions"
 )
 
+func noCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	cfg := config.Load()
 
@@ -41,9 +48,11 @@ func main() {
 	h := handlers.New(db, store)
 	r := mux.NewRouter()
 
-	// статика
+	// Статика. no-cache = браузер ревалидирует файл при каждом запросе
+	// (FileServer отвечает 304 по If-Modified-Since — дёшево); без этого
+	// после деплоя клиенты подолгу сидят на старых app.js/app.css.
 	r.PathPrefix("/static/").Handler(
-		http.StripPrefix("/static/", http.FileServer(http.Dir("static"))),
+		http.StripPrefix("/static/", noCache(http.FileServer(http.Dir("static")))),
 	)
 
 	// HTML-страницы

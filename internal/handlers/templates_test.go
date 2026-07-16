@@ -23,6 +23,7 @@ func TestTemplatesParse(t *testing.T) {
 	t.Cleanup(func() { os.Chdir(wd) })
 
 	funcMap := template.FuncMap{
+		"assetV":   func() string { return "" },
 		"upper":    strings.ToUpper,
 		"initials": func(string) string { return "" },
 	}
