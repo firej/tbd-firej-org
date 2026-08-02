@@ -20,7 +20,7 @@
 │   ├── config/               — ENV-конфиг
 │   ├── database/             — init + миграции
 │   ├── models/               — User, Task, SubTask
-│   └── handlers/             — auth, tasks, app (страница)
+│   └── handlers/             — auth, tasks, boards, tokens, mcp, app (страница)
 ├── templates/                — login.html, signup.html, app.html
 ├── static/
 │   ├── theme-paper.css       — токены и paper-тема из прототипа
@@ -97,6 +97,84 @@ make dev    # поднимет MariaDB в docker и запустит `go run` л
 - `DELETE /api/boards/{bid}/tasks/{id}`            — удалить.
 - `POST   /api/boards/{bid}/tasks/{id}/reorder`    — `{ before?: id, after?: id }`, серверный пересчёт `position`.
 - `POST   /api/boards/{bid}/tasks/sync`            — `{ since?, changes: [{ op: upsert|delete, id?, task? }] }` → `{ server_changes, server_time, conflicts }`. LWW по `updated_at`.
+
+### API-токены (для MCP и ботов)
+
+Программный доступ — не по cookie, а по Bearer-токену. Токен показывается один раз
+при создании (в БД хранится только SHA-256).
+
+- `GET    /api/tokens`      → `{ tokens: [...] }` (без самих токенов).
+- `POST   /api/tokens`      — `{ name }` → `{ token: { token: "tbd_...", ... } }`.
+- `DELETE /api/tokens/{id}` — отозвать.
+
+Выпустить токен из консоли (cookie берётся логином):
+
+```bash
+curl -c /tmp/tbd.cookies -X POST https://tbd.firej.org/auth/login \
+  -H 'Content-Type: application/json' -d '{"email":"...","password":"..."}'
+curl -b /tmp/tbd.cookies -X POST https://tbd.firej.org/api/tokens \
+  -H 'Content-Type: application/json' -d '{"name":"telegram-bot"}'
+```
+
+## MCP API
+
+Эндпоинт `POST /mcp` — [MCP](https://modelcontextprotocol.io) поверх streamable HTTP
+(stateless, официальный `modelcontextprotocol/go-sdk`). Авторизация:
+`Authorization: Bearer <токен из /api/tokens>`. Часовой пояс «сегодня/завтра» задаётся
+переменной `TZ` контейнера (tzdata вкомпилена).
+
+Инструменты нарочно простые — рассчитаны на дешёвые LLM в связке с ботом:
+
+| Инструмент      | Аргументы                                   | Что делает |
+|-----------------|---------------------------------------------|------------|
+| `list_boards`   | —                                           | Доски + число открытых задач |
+| `list_tasks`    | `board?`, `filter?` (`open`/`done`/`all`)   | Задачи в порядке приоритета, с короткими id |
+| `create_task`   | `title`, `board?`, `note?`, `due?`, `tag?`, `repeat?` | Создать наверху доски |
+| `complete_task` | `task` (короткий id)                        | Выполнить; повторяющуюся — перенести на следующий срок |
+| `update_task`   | `task`, `title?`, `note?`, `due?`, `tag?`, `repeat?` (`none` — убрать) | Частичное обновление |
+| `today_agenda`  | `date?` (`YYYY-MM-DD`)                      | План на день + просроченное — готовый утренний дайджест |
+
+Соглашения: задачи адресуются **коротким id** (первые 6 символов uuid, печатаются в
+`[скобках]`); даты — `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `today`/`tomorrow`; доска — по
+названию (без регистра, можно кусок). Дата без времени = конец дня (23:59). Все ответы —
+человекочитаемый текст, ошибки подсказывают следующий шаг (само-коррекция LLM).
+
+Подключить, например, к Claude Code:
+
+```bash
+claude mcp add tobedone --transport http https://tbd.firej.org/mcp --header "Authorization: Bearer tbd_..."
+```
+
+## Telegram-бот
+
+`cmd/bot` — мульти-юзерный бот: свободный текст → дешёвая LLM (любой
+OpenAI-совместимый endpoint) → MCP-инструменты выше. `/today` и прочие команды
+работают без LLM. План и архитектура — [docs/bot-plan.md](docs/bot-plan.md).
+
+Привязка аккаунта: меню профиля в вебе → «Подключить Telegram» → deep link
+с одноразовым кодом (`link_codes`, TTL 10 минут) → бот меняет код на API-токен
+через `POST /api/telegram/exchange`. Привязки живут в sqlite бота (volume).
+
+ENV бота (локально — `.env.bot`, `make run-bot`):
+
+| Переменная         | По умолчанию                    | Что значит |
+|--------------------|---------------------------------|------------|
+| `TELEGRAM_TOKEN`   | — (обязателен)                  | токен из BotFather |
+| `MCP_URL`          | `http://localhost:8080/mcp`     | MCP-эндпоинт tobedone |
+| `EXCHANGE_URL`     | `http://localhost:8080/api/telegram/exchange` | обмен кода привязки |
+| `BOT_DB`           | `bot.sqlite`                    | файл sqlite |
+| `LLM_BASE_URL`     | `''` (LLM выключена)            | напр. `https://api.deepseek.com/v1` |
+| `LLM_API_KEY`      | —                               | |
+| `LLM_MODEL`        | `deepseek-chat`                 | |
+| `DAILY_LIMIT`      | `50`                            | LLM-сообщений на юзера в день |
+| `GLOBAL_DAILY_LIMIT` | `500`                         | стоп-кран на всех |
+| `OWNER_CHAT_ID`    | `0`                             | алерты и `/stats` |
+| `DEFAULT_TZ`       | `Europe/Moscow`                 | пояс юзера до `/tz` |
+| `TELEGRAM_API_URL` | api.telegram.org                | переопределяется в тестах |
+
+Серверу для deep-link кнопки нужен `TELEGRAM_BOT_USERNAME` (username бота без @).
+В проде бот — сервис `bot` в compose (см. `docker-compose.prod.yml`), собирается
+из `Dockerfile.bot`, наружу ничего не открывает.
 
 ## Деплой
 

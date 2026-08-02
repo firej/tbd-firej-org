@@ -18,6 +18,14 @@ build: ## Собрать бинарник в bin/
 	@CGO_ENABLED=0 go build -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
 	@echo "$(GREEN)✓ Готово: $(BUILD_DIR)/$(BINARY_NAME)$(NC)"
 
+build-bot: ## Собрать telegram-бота в bin/
+	@mkdir -p $(BUILD_DIR)
+	@CGO_ENABLED=0 go build -o $(BUILD_DIR)/tobedone-bot ./cmd/bot
+	@echo "$(GREEN)✓ Готово: $(BUILD_DIR)/tobedone-bot$(NC)"
+
+run-bot: ## Запустить бота локально (env из .env.bot)
+	@set -a; [ -f .env.bot ] && . ./.env.bot; set +a; go run ./cmd/bot
+
 run: ## Запустить локально (требуется MariaDB на localhost:3306)
 	@echo "$(GREEN)Запуск...$(NC)"
 	@set -a; [ -f .env.local ] && . ./.env.local; set +a; go run $(MAIN_PATH)

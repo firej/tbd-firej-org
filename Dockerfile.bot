@@ -1,0 +1,30 @@
+# Telegram-бот tobedone. Отдельный образ: у бота нет входящего HTTP,
+# только polling наружу и MCP до app по внутренней сети.
+
+# ── builder ──────────────────────────────────────────────────
+FROM golang:1.25-bookworm AS builder
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags '-w -s' -o tobedone-bot ./cmd/bot
+
+# ── runtime ──────────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates tzdata && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /app/tobedone-bot .
+
+# sqlite бота — примонтируй volume в /data
+ENV BOT_DB=/data/bot.sqlite
+ENV MCP_URL=http://app:8080/mcp
+ENV EXCHANGE_URL=http://app:8080/api/telegram/exchange
+
+CMD ["./tobedone-bot"]
