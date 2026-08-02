@@ -63,6 +63,17 @@ type SubTask struct {
 	Done bool   `json:"done"`
 }
 
+// APIToken — токен программного доступа (MCP, боты). Хэш наружу не отдаём;
+// поле Token заполняется только в ответе на создание.
+type APIToken struct {
+	ID         int64      `json:"id"`
+	UserID     int64      `json:"-"`
+	Name       string     `json:"name"`
+	Token      string     `json:"token,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+}
+
 // AllowedColors / AllowedSizes — для валидации входящих данных.
 var AllowedColors = map[string]bool{
 	"terra": true, "indigo": true, "olive": true, "mustard": true, "rose": true, "clay": true,

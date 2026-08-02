@@ -18,9 +18,10 @@ import (
 )
 
 type Handler struct {
-	db        *sql.DB
-	store     *sessions.CookieStore
-	templates *template.Template
+	db          *sql.DB
+	store       *sessions.CookieStore
+	templates   *template.Template
+	botUsername string // username telegram-бота для deep-link привязки ('' = не настроен)
 }
 
 // staticVersion — версия статики для cache-busting: максимальный mtime
@@ -40,7 +41,7 @@ func staticVersion() string {
 	return strconv.FormatInt(latest.Unix(), 10)
 }
 
-func New(db *sql.DB, store *sessions.CookieStore) *Handler {
+func New(db *sql.DB, store *sessions.CookieStore, botUsername string) *Handler {
 	assetV := staticVersion()
 	funcMap := template.FuncMap{
 		"assetV": func() string { return assetV },
@@ -61,7 +62,7 @@ func New(db *sql.DB, store *sessions.CookieStore) *Handler {
 		},
 	}
 	tpl := template.Must(template.New("").Funcs(funcMap).ParseGlob("templates/*.html"))
-	return &Handler{db: db, store: store, templates: tpl}
+	return &Handler{db: db, store: store, templates: tpl, botUsername: botUsername}
 }
 
 // ── session helpers ────────────────────────────────────────────────

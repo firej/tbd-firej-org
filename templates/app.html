@@ -87,6 +87,7 @@
       <div class="user-menu-name">{{.User.DisplayName}}</div>
       <div class="user-menu-email">{{.User.Email}}</div>
       <div class="user-menu-divider"></div>
+      <button type="button" id="tg-btn" class="user-menu-item">Подключить Telegram</button>
       <button type="button" id="logout-btn" class="user-menu-item">Выйти</button>
     </div>
   </header>
@@ -237,6 +238,33 @@
         <button type="submit" class="btn btn-primary" id="board-modal-save">Сохранить</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Привязка Telegram-бота -->
+  <dialog id="tg-modal" class="task-modal">
+    <div class="modal-head">
+      <h2>Telegram-бот</h2>
+      <button type="button" class="modal-close" id="tg-close" aria-label="Закрыть">✕</button>
+    </div>
+
+    <p class="tg-hint">Бот умеет добавлять задачи, показывать агенду и присылать
+      утренний дайджест. Привязка одноразовым кодом — действует 10 минут.</p>
+
+    <div class="field" id="tg-link-wrap" hidden>
+      <a id="tg-link" class="btn btn-primary tg-open" target="_blank" rel="noopener">Открыть бота в Telegram</a>
+    </div>
+
+    <div class="field" id="tg-code-wrap" hidden>
+      <span>Или отправь боту команду:</span>
+      <code class="tg-code" id="tg-code"></code>
+    </div>
+
+    <div class="share-error" id="tg-error" hidden></div>
+
+    <div class="modal-footer">
+      <div style="flex:1"></div>
+      <button type="button" class="btn" id="tg-done">Готово</button>
+    </div>
   </dialog>
 
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>

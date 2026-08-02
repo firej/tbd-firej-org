@@ -14,9 +14,8 @@ import (
 
 // ── List ───────────────────────────────────────────────────────────
 
-// ListBoards — GET /api/boards: доски, где текущий юзер состоит участником.
-func (h *Handler) ListBoards(w http.ResponseWriter, r *http.Request) {
-	uid, _ := h.userID(r)
+// userBoards — доски, где юзер состоит участником, в порядке position.
+func (h *Handler) userBoards(uid int64) ([]*models.Board, error) {
 	rows, err := h.db.Query(`
 		SELECT b.id, b.owner_id, b.name, COALESCE(b.color, ''), b.position, b.created_at, b.updated_at
 		FROM boards b
@@ -24,8 +23,7 @@ func (h *Handler) ListBoards(w http.ResponseWriter, r *http.Request) {
 		WHERE m.user_id = ?
 		ORDER BY b.position ASC, b.created_at ASC`, uid)
 	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, "db error")
-		return
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -33,11 +31,21 @@ func (h *Handler) ListBoards(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var b models.Board
 		if err := rows.Scan(&b.ID, &b.OwnerID, &b.Name, &b.Color, &b.Position, &b.CreatedAt, &b.UpdatedAt); err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "scan error")
-			return
+			return nil, err
 		}
 		b.IsOwner = b.OwnerID == uid
 		out = append(out, &b)
+	}
+	return out, rows.Err()
+}
+
+// ListBoards — GET /api/boards: доски, где текущий юзер состоит участником.
+func (h *Handler) ListBoards(w http.ResponseWriter, r *http.Request) {
+	uid, _ := h.userID(r)
+	out, err := h.userBoards(uid)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "db error")
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"boards": out})
 }

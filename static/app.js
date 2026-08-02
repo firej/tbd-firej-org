@@ -1280,6 +1280,32 @@
         userMenu.hidden = true;
       }
     });
+    // привязка telegram-бота
+    document.getElementById('tg-btn').addEventListener('click', async () => {
+      userMenu.hidden = true;
+      const modal = document.getElementById('tg-modal');
+      const linkWrap = document.getElementById('tg-link-wrap');
+      const codeWrap = document.getElementById('tg-code-wrap');
+      const errEl = document.getElementById('tg-error');
+      linkWrap.hidden = codeWrap.hidden = true;
+      errEl.hidden = true;
+      modal.showModal();
+      try {
+        const j = await api('/api/telegram/link-code', { method: 'POST', body: '{}' });
+        if (j.url) {
+          document.getElementById('tg-link').href = j.url;
+          linkWrap.hidden = false;
+        }
+        document.getElementById('tg-code').textContent = '/link ' + j.code;
+        codeWrap.hidden = false;
+      } catch (e) {
+        errEl.textContent = 'Не удалось получить код: ' + e.message;
+        errEl.hidden = false;
+      }
+    });
+    document.getElementById('tg-close').addEventListener('click', () => document.getElementById('tg-modal').close());
+    document.getElementById('tg-done').addEventListener('click', () => document.getElementById('tg-modal').close());
+
     document.getElementById('logout-btn').addEventListener('click', async () => {
       try { await fetch('/auth/logout', { method: 'POST' }); } catch (e) {}
       // вычищаем весь локальный кэш tbd.* — на следующий вход подтянется свежее

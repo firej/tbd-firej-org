@@ -6,6 +6,10 @@ import (
 	"log"
 	"net/http"
 
+	// Встроенная база часовых поясов: в контейнере нет tzdata, а MCP-агенда
+	// считает «сегодня» по TZ из окружения.
+	_ "time/tzdata"
+
 	"github.com/evbogdanov/tobedone/internal/config"
 	"github.com/evbogdanov/tobedone/internal/database"
 	"github.com/evbogdanov/tobedone/internal/handlers"
@@ -45,7 +49,7 @@ func main() {
 		SameSite: http.SameSiteLaxMode,
 	}
 
-	h := handlers.New(db, store)
+	h := handlers.New(db, store, cfg.TelegramBotUsername)
 	r := mux.NewRouter()
 
 	// Статика. no-cache = браузер ревалидирует файл при каждом запросе
@@ -66,9 +70,24 @@ func main() {
 	r.HandleFunc("/auth/logout", h.Logout).Methods("POST", "GET")
 	r.HandleFunc("/auth/me", h.Me).Methods("GET")
 
+	// MCP API для LLM-агентов и ботов (авторизация Bearer-токеном)
+	r.Handle("/mcp", h.MCPHandler())
+
+	// Обмен кода привязки на токен — зовёт бот, сессии нет (код и есть credential).
+	// Регистрируется до /api-саброутера, чтобы не попасть под RequireAuthAPI.
+	r.HandleFunc("/api/telegram/exchange", h.ExchangeLinkCode).Methods("POST")
+
 	// API (требует авторизации)
 	api := r.PathPrefix("/api").Subrouter()
 	api.Use(h.RequireAuthAPI)
+
+	// API-токены для MCP
+	api.HandleFunc("/tokens", h.ListTokens).Methods("GET")
+	api.HandleFunc("/tokens", h.CreateToken).Methods("POST")
+	api.HandleFunc("/tokens/{id}", h.DeleteToken).Methods("DELETE")
+
+	// Привязка Telegram: выдача одноразового кода (под сессией)
+	api.HandleFunc("/telegram/link-code", h.CreateLinkCode).Methods("POST")
 
 	// Boards
 	api.HandleFunc("/boards", h.ListBoards).Methods("GET")

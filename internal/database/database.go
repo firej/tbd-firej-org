@@ -41,6 +41,29 @@ func InitDB(db *sql.DB) error {
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+		// Токены для программного доступа (MCP, боты). Хранится только SHA-256
+		// от токена — сам токен показывается один раз при создании.
+		`CREATE TABLE IF NOT EXISTS api_tokens (
+			id BIGINT PRIMARY KEY AUTO_INCREMENT,
+			user_id BIGINT NOT NULL,
+			name VARCHAR(120) NOT NULL,
+			token_hash CHAR(64) UNIQUE NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			last_used_at DATETIME NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+		// Одноразовые коды привязки Telegram: веб выдаёт код, бот меняет его
+		// на api_token. Хранится только SHA-256, живёт 10 минут, гасится при обмене.
+		`CREATE TABLE IF NOT EXISTS link_codes (
+			code_hash CHAR(64) PRIMARY KEY,
+			user_id BIGINT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			expires_at DATETIME NOT NULL,
+			used_at DATETIME NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
 		`CREATE TABLE IF NOT EXISTS tasks (
 			id CHAR(36) PRIMARY KEY,
 			user_id BIGINT NOT NULL,

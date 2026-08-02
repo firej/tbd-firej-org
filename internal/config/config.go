@@ -8,14 +8,18 @@ type Config struct {
 	DatabaseDSN   string
 	SessionSecret string
 	SecureCookie  bool
+	// Username telegram-бота (без @) — для deep-link «Подключить Telegram».
+	// Пусто = веб показывает только код для ручного /link.
+	TelegramBotUsername string
 }
 
 func Load() *Config {
 	return &Config{
-		Port:          getEnv("PORT", "8080"),
-		DatabaseDSN:   getEnv("DATABASE_DSN", "tobedone:tobedone@tcp(localhost:3306)/tobedone?parseTime=true&charset=utf8mb4&loc=UTC"),
-		SessionSecret: getEnv("SESSION_SECRET", "change-me-in-production"),
-		SecureCookie:  getEnv("SECURE_COOKIE", "false") == "true",
+		Port:                getEnv("PORT", "8080"),
+		DatabaseDSN:         getEnv("DATABASE_DSN", "tobedone:tobedone@tcp(localhost:3306)/tobedone?parseTime=true&charset=utf8mb4&loc=UTC"),
+		SessionSecret:       getEnv("SESSION_SECRET", "change-me-in-production"),
+		SecureCookie:        getEnv("SECURE_COOKIE", "false") == "true",
+		TelegramBotUsername: getEnv("TELEGRAM_BOT_USERNAME", ""),
 	}
 }
 
