@@ -17,9 +17,12 @@ import (
 // userBoards — доски, где юзер состоит участником, в порядке position.
 func (h *Handler) userBoards(uid int64) ([]*models.Board, error) {
 	rows, err := h.db.Query(`
-		SELECT b.id, b.owner_id, b.name, COALESCE(b.color, ''), b.position, b.created_at, b.updated_at
+		SELECT b.id, b.owner_id, b.name, COALESCE(b.color, ''), b.position, b.created_at, b.updated_at,
+		       ou.display_name,
+		       (SELECT COUNT(*) FROM board_members bm WHERE bm.board_id = b.id)
 		FROM boards b
 		JOIN board_members m ON m.board_id = b.id
+		JOIN users ou ON ou.id = b.owner_id
 		WHERE m.user_id = ?
 		ORDER BY b.position ASC, b.created_at ASC`, uid)
 	if err != nil {
@@ -30,7 +33,8 @@ func (h *Handler) userBoards(uid int64) ([]*models.Board, error) {
 	out := make([]*models.Board, 0, 8)
 	for rows.Next() {
 		var b models.Board
-		if err := rows.Scan(&b.ID, &b.OwnerID, &b.Name, &b.Color, &b.Position, &b.CreatedAt, &b.UpdatedAt); err != nil {
+		if err := rows.Scan(&b.ID, &b.OwnerID, &b.Name, &b.Color, &b.Position, &b.CreatedAt, &b.UpdatedAt,
+			&b.OwnerName, &b.MembersCount); err != nil {
 			return nil, err
 		}
 		b.IsOwner = b.OwnerID == uid
@@ -130,9 +134,14 @@ func (h *Handler) createDefaultBoard(uid int64) error {
 func (h *Handler) getBoard(uid int64, id string) (*models.Board, error) {
 	var b models.Board
 	err := h.db.QueryRow(`
-		SELECT id, owner_id, name, COALESCE(color, ''), position, created_at, updated_at
-		FROM boards WHERE id = ?`, id,
-	).Scan(&b.ID, &b.OwnerID, &b.Name, &b.Color, &b.Position, &b.CreatedAt, &b.UpdatedAt)
+		SELECT b.id, b.owner_id, b.name, COALESCE(b.color, ''), b.position, b.created_at, b.updated_at,
+		       ou.display_name,
+		       (SELECT COUNT(*) FROM board_members bm WHERE bm.board_id = b.id)
+		FROM boards b
+		JOIN users ou ON ou.id = b.owner_id
+		WHERE b.id = ?`, id,
+	).Scan(&b.ID, &b.OwnerID, &b.Name, &b.Color, &b.Position, &b.CreatedAt, &b.UpdatedAt,
+		&b.OwnerName, &b.MembersCount)
 	if err != nil {
 		return nil, err
 	}

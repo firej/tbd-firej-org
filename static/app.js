@@ -770,20 +770,65 @@
     const dotEl  = document.getElementById('board-dot');
     if (nameEl) nameEl.textContent = b ? b.name : 'Доска';
     if (dotEl)  dotEl.className = 'board-dot' + (b ? ' sw-' + b.color : '');
+
+    // в компактном режиме пометку о доступе вешаем на саму кнопку
+    const badge = document.getElementById('board-btn-shared');
+    const info = boardShareInfo(b);
+    if (badge) {
+      badge.hidden = !info;
+      badge.classList.toggle('foreign', !!(b && !b.is_owner));
+      if (info) {
+        badge.textContent = info.label;
+        badge.title = info.title;
+      }
+    }
+    const btn = document.getElementById('board-btn');
+    if (btn) btn.title = b ? (b.name + (info ? ' — ' + info.title : '')) : 'Доска';
   }
 
   // Табы — по кнопке на доску + «＋». Видны на широком экране.
+  // Пометка о совместном доступе:
+  //   • чужая доска — «от Имя» (заодно различает одноимённые «Личное»)
+  //   • своя, но с участниками — «общая»
+  //   • своя, только моя — пометки нет
+  function boardShareInfo(b) {
+    if (!b) return null;
+    if (!b.is_owner) {
+      const who = (b.owner_name || '').trim().split(/\s+/)[0];
+      return {
+        label: who ? 'от ' + who : 'общая',
+        title: who ? 'Доска пользователя ' + (b.owner_name || '').trim() + ' — вам открыли доступ'
+                   : 'Этой доской поделились с вами',
+      };
+    }
+    const n = b.members_count || 1;
+    if (n > 1) {
+      return { label: 'общая', title: 'Вы поделились доской · участников: ' + n };
+    }
+    return null;
+  }
+
+  function shareBadgeHTML(b, cls) {
+    const info = boardShareInfo(b);
+    if (!info) return '';
+    return '<span class="' + cls + '" title="' + escapeHtml(info.title) + '">' +
+             escapeHtml(info.label) + '</span>';
+  }
+
   function renderBoardTabs() {
     const wrap = document.getElementById('board-tabs');
     if (!wrap) return;
-    wrap.innerHTML = boards.map(b => (
-      '<button type="button" class="board-tab' + (b.id === currentBoardId ? ' active' : '') +
-        '" data-bid="' + b.id + '" title="' + escapeHtml(b.name) + '">' +
+    wrap.innerHTML = boards.map(b => {
+      const info = boardShareInfo(b);
+      const title = b.name + (info ? ' — ' + info.title : '');
+      return '<button type="button" class="board-tab' + (b.id === currentBoardId ? ' active' : '') +
+        (b.is_owner ? '' : ' foreign') +
+        '" data-bid="' + b.id + '" title="' + escapeHtml(title) + '">' +
         '<span class="board-dot sw-' + b.color + '"></span>' +
         '<span class="board-tab-name">' + escapeHtml(b.name) + '</span>' +
-        (b.is_owner ? '' : '<span class="board-tab-shared" title="Общая доска">·</span>') +
-      '</button>'
-    )).join('') +
+        shareBadgeHTML(b, 'board-tab-shared') +
+      '</button>';
+    }).join('') +
       '<button type="button" class="board-tab board-tab-add" id="board-tab-add" title="Новая доска">＋</button>';
   }
 
@@ -794,10 +839,11 @@
     if (!list) return;
     list.innerHTML = boards.map(b => (
       '<button type="button" class="board-menu-item board-item' +
-        (b.id === currentBoardId ? ' active' : '') + '" data-bid="' + b.id + '">' +
+        (b.id === currentBoardId ? ' active' : '') + (b.is_owner ? '' : ' foreign') +
+        '" data-bid="' + b.id + '">' +
         '<span class="board-dot sw-' + b.color + '"></span>' +
         '<span class="board-item-name">' + escapeHtml(b.name) + '</span>' +
-        (b.is_owner ? '' : '<span class="board-item-shared" title="Общая доска">общая</span>') +
+        shareBadgeHTML(b, 'board-item-shared') +
       '</button>'
     )).join('');
 
@@ -1008,6 +1054,7 @@
       });
       document.getElementById('share-email').value = '';
       loadMembers();
+      loadBoards(); // счётчик участников изменился — обновляем пометку «общая»
     } catch (err) {
       errEl.textContent = err.message;
       errEl.hidden = false;
@@ -1020,6 +1067,7 @@
     try {
       await api('/api/boards/' + b.id + '/members/' + uid, { method: 'DELETE' });
       loadMembers();
+      loadBoards(); // участников стало меньше — пометка могла погаснуть
     } catch (err) {
       const errEl = document.getElementById('share-error');
       errEl.textContent = err.message; errEl.hidden = false;

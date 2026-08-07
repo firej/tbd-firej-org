@@ -662,7 +662,22 @@ body > * { position: relative; z-index: 1; }
   color: var(--ink);
 }
 .board-tab-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
-.board-tab-shared { color: var(--ink-faint); font-weight: 700; }
+/* пометка совместного доступа: «общая» на своей доске, «от Имя» — на чужой */
+.board-tab-shared, .board-btn-shared {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-faint);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* чужая доска — пунктирная рамка, чтобы отличалась от своей общей с одного взгляда */
+.board-tab.foreign .board-tab-shared { border-style: dashed; }
 .board-tab-add { padding: 0 11px; color: var(--ink-faint); font-size: 16px; }
 .board-tab-add:hover { color: var(--ink); }
 
@@ -715,13 +730,16 @@ body > * { position: relative; z-index: 1; }
 .board-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .board-item-shared {
   font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   color: var(--ink-faint);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 1px 5px;
+  white-space: nowrap;
+  flex: none;
 }
+.board-btn-shared.foreign,
+.board-item.foreign .board-item-shared { border-style: dashed; }
 .board-owner-actions { display: flex; flex-direction: column; gap: 2px; }
 
 /* ── Share modal: members ───────────────────────────────────── */

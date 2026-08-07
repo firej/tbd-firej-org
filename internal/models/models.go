@@ -23,7 +23,11 @@ type Board struct {
 	CreatedAt time.Time     `json:"created_at"`
 	UpdatedAt time.Time     `json:"updated_at"`
 	IsOwner   bool          `json:"is_owner"`          // вычисляемое: текущий юзер — владелец
+	OwnerName string        `json:"owner_name"`        // чьё имя показывать на чужой доске
 	Members   []BoardMember `json:"members,omitempty"` // заполняется по запросу
+	// MembersCount — сколько всего участников (владелец включительно).
+	// > 1 значит доска общая: своей вы с кем-то поделились, чужую открыли вам.
+	MembersCount int `json:"members_count"`
 }
 
 // BoardMember — участник доски (для UI шаринга).
