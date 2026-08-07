@@ -318,17 +318,20 @@ func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
 
 	args = append(args, bid, id)
 	q := "UPDATE tasks SET " + strings.Join(sets, ", ") + " WHERE board_id = ? AND id = ? AND deleted_at IS NULL"
-	res, err := h.db.Exec(q, args...)
-	if err != nil {
+	if _, err := h.db.Exec(q, args...); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "update error")
 		return
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+
+	// «Не найдено» определяем по самой строке, а не по RowsAffected: MariaDB
+	// считает изменённой только строку с реально другими значениями, поэтому
+	// повторный PATCH тем же значением (частый случай на общей доске, где
+	// карточку уже закрыл другой участник) давал ложную 404.
+	t, err := h.getTask(bid, id)
+	if err == sql.ErrNoRows {
 		writeJSONError(w, http.StatusNotFound, "task not found")
 		return
 	}
-
-	t, err := h.getTask(bid, id)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "fetch error")
 		return
@@ -343,16 +346,26 @@ func (h *Handler) PatchTask(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	bid := mux.Vars(r)["bid"]
 	id := mux.Vars(r)["id"]
-	res, err := h.db.Exec(
+	if _, err := h.db.Exec(
 		"UPDATE tasks SET deleted_at = CURRENT_TIMESTAMP WHERE board_id = ? AND id = ? AND deleted_at IS NULL",
 		bid, id,
-	)
-	if err != nil {
+	); err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "delete error")
 		return
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+
+	// Идемпотентно: если карточку уже заархивировал другой участник, это не
+	// ошибка. 404 отдаём только когда такой задачи на доске нет вовсе.
+	var exists int
+	err := h.db.QueryRow(
+		"SELECT 1 FROM tasks WHERE board_id = ? AND id = ?", bid, id,
+	).Scan(&exists)
+	if err == sql.ErrNoRows {
 		writeJSONError(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "delete error")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

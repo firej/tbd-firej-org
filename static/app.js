@@ -52,6 +52,8 @@
   let syncTimer = null;
   let dragJustEnded = 0;    // timestamp окончания drag — используем чтобы не открывать модалку по синтетическому click'у Sortable'а
   let inFlightCreates = 0;  // счётчик незавершённых POST /api/tasks — пока > 0, pullAll не сметает кэш
+  let inFlightWrites  = 0;  // незавершённые PATCH/DELETE — пул не должен вернуть их старое состояние
+  let writeSeq        = 0;  // счётчик локальных правок: растёт на каждое изменение кэша
 
   // ── helpers ───────────────────────────────────────────────
   function uuid() {
@@ -181,15 +183,19 @@
     if (!currentBoardId) return;
     // Не пуллим, пока есть оптимистично созданные задачи (tmp_*) или незавершённые POST'ы —
     // иначе перетрём то, что ещё не сохранилось на сервере.
-    if (inFlightCreates > 0) return;
+    if (inFlightCreates > 0 || inFlightWrites > 0) return;
     if (tasks.some(t => typeof t.id === 'string' && t.id.indexOf('tmp_') === 0)) return;
 
     const bid = currentBoardId;
+    const seq = writeSeq;
     setSyncState('syncing');
     try {
       const data = await api(boardPath('/tasks'));
       // доска могла смениться, пока шёл запрос — не перетираем чужой кэш
       if (bid !== currentBoardId) return;
+      // за время запроса пользователь успел что-то поменять — ответ уже
+      // устарел и вернул бы галочку в прежнее состояние (см. patchTask)
+      if (seq !== writeSeq || inFlightWrites > 0) return;
       tasks = data.tasks || [];
       saveCache();
       localStorage.setItem(LAST_SYNC_PREFIX + bid, new Date().toISOString());
@@ -467,6 +473,7 @@
     setTimeout(() => {
       const before = captureTileRects();
       tasks = tasks.filter(t => !ids.has(t.id));
+      writeSeq++;
       saveCache();
       renderAll();
       initSortable();
@@ -528,6 +535,7 @@
         else newPos = 1024;
 
         t.position = newPos;
+        writeSeq++;
         saveCache();
 
         // Если перетаскиваем оптимистично созданную задачу (ещё нет серверного id) —
@@ -643,6 +651,7 @@
     // оптимистично двигаем срок сразу, рендерим после вспышки
     tasks[i].due_at = nextDueAt(tasks[i].due_at, tasks[i].repeat);
     tasks[i].updated_at = new Date().toISOString();
+    writeSeq++;
     saveCache();
 
     const check = tileEl && tileEl.querySelector('.tile-check');
@@ -655,6 +664,7 @@
 
     if (id.indexOf('tmp_') === 0) return; // на сервер уедет вместе с созданием
 
+    inFlightWrites++;
     try {
       setSyncState('syncing');
       const data = await api(boardPath('/tasks/' + id), {
@@ -668,6 +678,8 @@
     } catch (err) {
       enqueue({ method: 'PATCH', path: boardPath('/tasks/' + id), body: { done: true } });
       setSyncState(navigator.onLine ? 'error' : 'offline');
+    } finally {
+      inFlightWrites--;
     }
   }
 
@@ -681,25 +693,30 @@
       local.completed_at = patch.done ? new Date().toISOString() : null;
     }
     Object.assign(tasks[i], local, { updated_at: new Date().toISOString() });
+    writeSeq++;
     saveCache();
     renderAll();
     initSortable();
 
     if (id.indexOf('tmp_') === 0) return; // пока не доехал на сервер — нечего пачить
 
+    inFlightWrites++;
     try {
       setSyncState('syncing');
       const data = await api(boardPath('/tasks/' + id), {
         method: 'PATCH', body: JSON.stringify(patch),
       });
       if (data && data.task) {
-        tasks[i] = data.task;
+        const j = tasks.findIndex(x => x.id === id); // индекс мог сдвинуться
+        if (j >= 0) tasks[j] = data.task;
         saveCache();
       }
       setSyncState('synced');
     } catch (err) {
       enqueue({ method: 'PATCH', path: boardPath('/tasks/' + id), body: patch });
       setSyncState(navigator.onLine ? 'error' : 'offline');
+    } finally {
+      inFlightWrites--;
     }
   }
 
@@ -717,6 +734,7 @@
     const i = tasks.findIndex(x => x.id === id); // индекс мог сдвинуться за время анимации
     if (i < 0) return;
     tasks.splice(i, 1);
+    writeSeq++;
     saveCache();
     flipRerender();
     await deleteOnServer(id);
@@ -724,6 +742,7 @@
 
   async function deleteOnServer(id) {
     if (id.indexOf('tmp_') === 0) return;
+    inFlightWrites++;
     try {
       setSyncState('syncing');
       await api(boardPath('/tasks/' + id), { method: 'DELETE' });
@@ -731,6 +750,8 @@
     } catch (err) {
       enqueue({ method: 'DELETE', path: boardPath('/tasks/' + id) });
       setSyncState(navigator.onLine ? 'error' : 'offline');
+    } finally {
+      inFlightWrites--;
     }
   }
 
