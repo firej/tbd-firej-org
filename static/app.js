@@ -3,10 +3,10 @@
    Архитектура:
      • Локальный кэш задач в localStorage (ключ TASKS_KEY).
      • Sync state machine: synced ↔ syncing ↔ offline ↔ error.
-     • При любом действии — оптимистичный апдейт кэша + fetch,
-       при ошибке/оффлайне действие попадает в очередь PENDING_KEY.
-     • Очередь повторно пушится либо при возвращении сети, либо
-       раз в 20 секунд по таймеру.
+     • При любом действии — оптимистичный апдейт кэша и сохранение
+       запроса в PENDING_KEY до отправки; подтверждённые запросы удаляются.
+     • Очередь отправляется по порядку при действии, возвращении сети
+       или раз в 30 секунд по таймеру.
    ============================================================ */
 
 (function () {
@@ -51,8 +51,6 @@
   let syncState = 'synced'; // synced | syncing | offline | error
   let syncTimer = null;
   let dragJustEnded = 0;    // timestamp окончания drag — используем чтобы не открывать модалку по синтетическому click'у Sortable'а
-  let inFlightCreates = 0;  // счётчик незавершённых POST /api/tasks — пока > 0, pullAll не сметает кэш
-  let inFlightWrites  = 0;  // незавершённые PATCH/DELETE — пул не должен вернуть их старое состояние
   let writeSeq        = 0;  // счётчик локальных правок: растёт на каждое изменение кэша
 
   // ── helpers ───────────────────────────────────────────────
@@ -135,7 +133,9 @@
     if (!res.ok) {
       let msg = 'HTTP ' + res.status;
       try { const j = await res.json(); if (j.error) msg = j.error; } catch (e) {}
-      throw new Error(msg);
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
     }
     if (res.status === 204) return null;
     return res.json();
@@ -148,42 +148,49 @@
     savePending();
   }
 
-  async function flushPending() {
-    if (pending.length === 0) return;
+  let flushing = null;
+  function flushPending() {
+    if (flushing) return flushing;
+    flushing = drainPending().finally(() => { flushing = null; });
+    return flushing;
+  }
+
+  async function drainPending() {
+    if (!pending.length) return;
     if (!navigator.onLine) { setSyncState('offline'); return; }
-
     setSyncState('syncing');
-    const queue = pending.slice();
-    pending = [];
-    savePending();
-
-    let failed = false;
-    for (const action of queue) {
+    while (pending.length) {
+      const action = pending[0];
       try {
         await api(action.path, {
           method: action.method,
           body: action.body ? JSON.stringify(action.body) : undefined,
         });
       } catch (err) {
-        // 404 на delete/patch — задача уже могла быть удалена, пропускаем
-        if (/HTTP 404/.test(err.message)) continue;
-        failed = true;
-        // не теряем — кладём обратно в начало
-        pending.unshift(action);
+        // A removed task needs no further edits. Other failures retain the
+        // entire remaining queue in its original order, including on disk.
+        if (!(err.status === 404 && ['PATCH', 'DELETE'].includes(action.method))) {
+          setSyncState(navigator.onLine ? 'error' : 'offline');
+          return;
+        }
       }
+      pending.shift();
+      savePending();
     }
-    savePending();
-    if (failed) setSyncState('error');
-    else        setSyncState('synced');
+    setSyncState('synced');
+  }
+
+  function sendAction(action) {
+    enqueue(action);
+    return flushPending().then(pullAll);
   }
 
   // ── initial pull ──────────────────────────────────────────
   async function pullAll() {
     if (!navigator.onLine) { setSyncState('offline'); return; }
     if (!currentBoardId) return;
-    // Не пуллим, пока есть оптимистично созданные задачи (tmp_*) или незавершённые POST'ы —
-    // иначе перетрём то, что ещё не сохранилось на сервере.
-    if (inFlightCreates > 0 || inFlightWrites > 0) return;
+    // Не перетираем локальные правки, пока очередь не подтверждена сервером.
+    if (pending.length || flushing) return;
     if (tasks.some(t => typeof t.id === 'string' && t.id.indexOf('tmp_') === 0)) return;
 
     const bid = currentBoardId;
@@ -195,7 +202,7 @@
       if (bid !== currentBoardId) return;
       // за время запроса пользователь успел что-то поменять — ответ уже
       // устарел и вернул бы галочку в прежнее состояние (см. patchTask)
-      if (seq !== writeSeq || inFlightWrites > 0) return;
+      if (seq !== writeSeq || pending.length || flushing) return;
       tasks = data.tasks || [];
       saveCache();
       localStorage.setItem(LAST_SYNC_PREFIX + bid, new Date().toISOString());
@@ -459,6 +466,7 @@
       return ts && (now - ts > DONE_TTL_MS);
     });
     if (!expired.length) return;
+    const bid = currentBoardId;
 
     const ids = new Set(expired.map(t => t.id));
     let i = 0;
@@ -471,6 +479,11 @@
     // ждём конца анимаций исчезновения, затем убираем из кэша одним
     // FLIP-рендером (соседи плавно съезжаются) и удаляем на сервере
     setTimeout(() => {
+      if (currentBoardId !== bid) {
+        localStorage.setItem(tasksKey(bid), JSON.stringify(loadCache(bid).filter(t => !ids.has(t.id))));
+        expired.forEach(t => deleteOnServer(t.id, bid));
+        return;
+      }
       const before = captureTileRects();
       tasks = tasks.filter(t => !ids.has(t.id));
       writeSeq++;
@@ -478,7 +491,7 @@
       renderAll();
       initSortable();
       playFlip(before);
-      expired.forEach(t => deleteOnServer(t.id));
+      expired.forEach(t => deleteOnServer(t.id, bid));
     }, 620 + i * 90);
   }
 
@@ -538,46 +551,18 @@
         writeSeq++;
         saveCache();
 
-        // Если перетаскиваем оптимистично созданную задачу (ещё нет серверного id) —
-        // только локальный апдейт; позиция уйдёт на сервер вместе с самой задачей.
-        if (id.indexOf('tmp_') === 0) return;
-
-        // Серверный пересчёт — отправляем before/after id'шки.
-        // Пропускаем якоря, которые сами ещё tmp_ (на сервере их нет).
-        const safeAfter  = (afterId  && afterId.indexOf('tmp_')  !== 0) ? afterId  : null;
-        const safeBefore = (beforeId && beforeId.indexOf('tmp_') !== 0) ? beforeId : null;
-        if (!safeAfter && !safeBefore) return; // нет валидных якорей
-
-        try {
-          setSyncState('syncing');
-          const body = {};
-          if (safeAfter)  body.before = safeAfter;  // встаём ПЕРЕД таском с id=afterId
-          if (safeBefore) body.after  = safeBefore; // и ПОСЛЕ таска с id=beforeId
-          const data = await api(boardPath('/tasks/' + id + '/reorder'), {
-            method: 'POST', body: JSON.stringify(body),
-          });
-          if (data && data.task) {
-            const i = tasks.findIndex(x => x.id === id);
-            if (i >= 0) tasks[i] = data.task;
-            saveCache();
-          }
-          setSyncState('synced');
-        } catch (err) {
-          // в очередь — повторим позже
-          enqueue({ method: 'POST', path: boardPath('/tasks/' + id + '/reorder'),
-                    body: { before: safeAfter, after: safeBefore } });
-          setSyncState(navigator.onLine ? 'error' : 'offline');
-        }
+        await sendAction({ method: 'PATCH', path: boardPath('/tasks/' + id),
+                           body: { position: newPos } });
       },
     });
   }
 
   // ── CRUD ──────────────────────────────────────────────────
   async function createTask(payload, atEnd) {
-    // оптимистично — создаём временный id, реальный придёт с сервера
+    // Постоянный ID позволяет повторять создание после потери ответа.
     const positions = tasks.map(t => t.position || 0);
     const tmp = {
-      id: 'tmp_' + uuid(),
+      id: uuid(),
       title: payload.title, note: payload.note || '',
       color: payload.color, size: payload.size,
       tag: payload.tag || '', done: false,
@@ -595,31 +580,9 @@
     renderAll();
     initSortable();
 
-    inFlightCreates++;
-    try {
-      setSyncState('syncing');
-      const data = await api(boardPath('/tasks'), {
-        method: 'POST',
-        body: JSON.stringify({
-          title: payload.title, note: payload.note,
-          color: payload.color, size: payload.size,
-          tag: payload.tag, due_at: payload.due_at,
-          repeat: payload.repeat || '',
-          position: tmp.position,
-        }),
-      });
-      const idx = tasks.findIndex(x => x.id === tmp.id);
-      if (idx >= 0 && data && data.task) tasks[idx] = data.task;
-      saveCache();
-      renderAll();
-      initSortable();
-      setSyncState('synced');
-    } catch (err) {
-      // оставляем tmp в кэше и помечаем ошибку (на pending класть нельзя — нет id)
-      setSyncState(navigator.onLine ? 'error' : 'offline');
-    } finally {
-      inFlightCreates--;
-    }
+    writeSeq++;
+    await sendAction({ method: 'POST', path: boardPath('/tasks'),
+                       body: Object.assign({}, payload, { id: tmp.id, position: tmp.position }) });
   }
 
   // Следующее наступление повторяющейся задачи — строго в будущем.
@@ -662,25 +625,9 @@
     if (tileEl) tileEl.classList.add('tile-rolled');
     setTimeout(() => { renderAll(); initSortable(); }, 500);
 
-    if (id.indexOf('tmp_') === 0) return; // на сервер уедет вместе с созданием
-
-    inFlightWrites++;
-    try {
-      setSyncState('syncing');
-      const data = await api(boardPath('/tasks/' + id), {
-        method: 'PATCH', body: JSON.stringify({ done: true }),
-      });
-      if (data && data.task) {
-        const j = tasks.findIndex(x => x.id === id);
-        if (j >= 0) { tasks[j] = data.task; saveCache(); }
-      }
-      setSyncState('synced');
-    } catch (err) {
-      enqueue({ method: 'PATCH', path: boardPath('/tasks/' + id), body: { done: true } });
-      setSyncState(navigator.onLine ? 'error' : 'offline');
-    } finally {
-      inFlightWrites--;
-    }
+    // Send the resulting date so retrying a lost response cannot advance twice.
+    await sendAction({ method: 'PATCH', path: boardPath('/tasks/' + id),
+                       body: { due_at: tasks[i].due_at, done: false } });
   }
 
   async function patchTask(id, patch) {
@@ -698,30 +645,13 @@
     renderAll();
     initSortable();
 
-    if (id.indexOf('tmp_') === 0) return; // пока не доехал на сервер — нечего пачить
-
-    inFlightWrites++;
-    try {
-      setSyncState('syncing');
-      const data = await api(boardPath('/tasks/' + id), {
-        method: 'PATCH', body: JSON.stringify(patch),
-      });
-      if (data && data.task) {
-        const j = tasks.findIndex(x => x.id === id); // индекс мог сдвинуться
-        if (j >= 0) tasks[j] = data.task;
-        saveCache();
-      }
-      setSyncState('synced');
-    } catch (err) {
-      enqueue({ method: 'PATCH', path: boardPath('/tasks/' + id), body: patch });
-      setSyncState(navigator.onLine ? 'error' : 'offline');
-    } finally {
-      inFlightWrites--;
-    }
+    await sendAction({ method: 'PATCH', path: boardPath('/tasks/' + id), body: patch });
   }
 
   async function deleteTask(id) {
     if (!tasks.some(x => x.id === id)) return;
+    const path = boardPath('/tasks/' + id);
+    const bid = currentBoardId;
     cancelSink(id);
 
     // сначала исчезает сама карточка, потом соседи FLIP'ом съезжаются на её место
@@ -731,28 +661,23 @@
       await new Promise(r => setTimeout(r, 300)); // длительность анимации tile-remove
     }
 
+    if (bid !== currentBoardId) {
+      const cached = loadCache(bid).filter(t => t.id !== id);
+      localStorage.setItem(tasksKey(bid), JSON.stringify(cached));
+      await sendAction({ method: 'DELETE', path });
+      return;
+    }
     const i = tasks.findIndex(x => x.id === id); // индекс мог сдвинуться за время анимации
     if (i < 0) return;
     tasks.splice(i, 1);
     writeSeq++;
     saveCache();
     flipRerender();
-    await deleteOnServer(id);
+    await sendAction({ method: 'DELETE', path });
   }
 
-  async function deleteOnServer(id) {
-    if (id.indexOf('tmp_') === 0) return;
-    inFlightWrites++;
-    try {
-      setSyncState('syncing');
-      await api(boardPath('/tasks/' + id), { method: 'DELETE' });
-      setSyncState('synced');
-    } catch (err) {
-      enqueue({ method: 'DELETE', path: boardPath('/tasks/' + id) });
-      setSyncState(navigator.onLine ? 'error' : 'offline');
-    } finally {
-      inFlightWrites--;
-    }
+  async function deleteOnServer(id, bid = currentBoardId) {
+    await sendAction({ method: 'DELETE', path: '/api/boards/' + bid + '/tasks/' + id });
   }
 
   // ── доски (пространства) + шаринг ─────────────────────────
@@ -1576,7 +1501,30 @@
   }
 
   // ── boot ──────────────────────────────────────────────────
+  function recoverTemporaryTasks() {
+    for (const key of Object.keys(localStorage)) {
+      if (!key.startsWith(TASKS_PREFIX)) continue;
+      const bid = key.slice(TASKS_PREFIX.length);
+      const cached = loadCache(bid);
+      for (const task of cached) {
+        if (!String(task.id).startsWith('tmp_')) continue;
+        const oldID = task.id;
+        task.id = oldID.slice(4);
+        const path = '/api/boards/' + bid + '/tasks';
+        // Persist requests before changing the cache. Repeating recovery is safe.
+        if (!pending.some(a => a.method === 'POST' && a.path === path && a.body?.id === task.id)) {
+          enqueue({ method: 'POST', path, body: task });
+          enqueue({ method: 'PATCH', path: path + '/' + task.id,
+                    body: { done: task.done, sub: task.sub || [] } });
+        }
+      }
+      localStorage.setItem(key, JSON.stringify(cached));
+    }
+    tasks = currentBoardId ? loadCache(currentBoardId) : [];
+  }
+
   function boot() {
+    recoverTemporaryTasks();
     setSyncState(navigator.onLine ? 'synced' : 'offline');
     renderBoardUI();
     renderAll();

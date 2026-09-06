@@ -120,6 +120,7 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 // ── Create ─────────────────────────────────────────────────────────
 
 type createTaskPayload struct {
+	ID       string     `json:"id"`
 	Title    string     `json:"title"`
 	Note     string     `json:"note"`
 	Color    string     `json:"color"`
@@ -168,7 +169,13 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	id := uuid.NewString()
+	id := p.ID
+	if id == "" {
+		id = uuid.NewString()
+	} else if _, err := uuid.Parse(id); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
 
 	var dueAt interface{}
 	if p.DueAt != nil {
@@ -189,6 +196,14 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		id, uid, bid, p.Title, noteVal, p.Color, p.Size, tagVal, pos, dueAt, nullIfEmpty(p.Repeat),
 	)
 	if err != nil {
+		// A retry after a lost response must not create another task. Only
+		// return an existing task when it belongs to the authorized board.
+		if p.ID != "" {
+			if existing, fetchErr := h.getTask(bid, id); fetchErr == nil {
+				writeJSON(w, http.StatusOK, map[string]interface{}{"task": existing})
+				return
+			}
+		}
 		writeJSONError(w, http.StatusInternalServerError, "insert error")
 		return
 	}
@@ -515,9 +530,13 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 			}
 			// existing updated_at для LWW
 			var existingUpdated sql.NullTime
-			h.db.QueryRow(
+			err := h.db.QueryRow(
 				"SELECT updated_at FROM tasks WHERE board_id = ? AND id = ?", bid, t.ID,
 			).Scan(&existingUpdated)
+			if err != nil && err != sql.ErrNoRows {
+				writeJSONError(w, http.StatusInternalServerError, "db error")
+				return
+			}
 			clientUpdated := t.UpdatedAt
 			if existingUpdated.Valid && !clientUpdated.IsZero() && clientUpdated.Before(existingUpdated.Time) {
 				// сервер свежее — пропускаем
@@ -532,15 +551,25 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 			if t.Done {
 				doneInt = 1
 			}
-			h.db.Exec(`
-				INSERT INTO tasks (id, user_id, board_id, title, note, color, size, tag, done, position, due_at, sub, recurrence)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON DUPLICATE KEY UPDATE
-				  title=VALUES(title), note=VALUES(note), color=VALUES(color), size=VALUES(size),
-				  tag=VALUES(tag), done=VALUES(done), position=VALUES(position),
-				  due_at=VALUES(due_at), sub=VALUES(sub), recurrence=VALUES(recurrence)
-			`, t.ID, uid, bid, t.Title, nullIfEmpty(t.Note), t.Color, t.Size, nullIfEmpty(t.Tag),
-				doneInt, t.Position, dueAt, string(subJSON), nullIfEmpty(t.Repeat))
+			// Never use a global-ID upsert: a duplicate can belong to a
+			// different board. Both updates and inserts are scoped explicitly.
+			if existingUpdated.Valid {
+				_, err = h.db.Exec(`UPDATE tasks SET title=?, note=?, color=?, size=?, tag=?,
+						done=?, position=?, due_at=?, sub=?, recurrence=?
+						WHERE board_id=? AND id=?`,
+					t.Title, nullIfEmpty(t.Note), t.Color, t.Size, nullIfEmpty(t.Tag),
+					doneInt, t.Position, dueAt, string(subJSON), nullIfEmpty(t.Repeat), bid, t.ID)
+			} else {
+				_, err = h.db.Exec(`INSERT INTO tasks
+						(id, user_id, board_id, title, note, color, size, tag, done, position, due_at, sub, recurrence)
+						VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					t.ID, uid, bid, t.Title, nullIfEmpty(t.Note), t.Color, t.Size, nullIfEmpty(t.Tag),
+					doneInt, t.Position, dueAt, string(subJSON), nullIfEmpty(t.Repeat))
+			}
+			if err != nil {
+				writeJSONError(w, http.StatusConflict, "task could not be saved")
+				return
+			}
 		}
 	}
 

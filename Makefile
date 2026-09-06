@@ -33,8 +33,9 @@ run: ## Запустить локально (требуется MariaDB на loc
 clean: ## Очистить bin/
 	@rm -rf $(BUILD_DIR)
 
-test: ## Запустить тесты
+test: ## Запустить тесты Go и клиентской синхронизации (нужен Node.js)
 	@go test -v ./...
+	@node --test tests/*.test.cjs
 
 fmt: ## go fmt
 	@go fmt ./...
