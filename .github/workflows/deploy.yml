@@ -32,8 +32,6 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          # Public key only: useful when authorizing a replacement server.
-          echo "::notice title=Deploy SSH public key::$(ssh-keygen -y -f ~/.ssh/deploy_key)"
           echo "tbd.firej.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHER3/rt7Op6zGK2Qtf4rMbxQFRYZJoGi/QhPkz6pzM6" > ~/.ssh/known_hosts
 
       - name: Deploy to server
