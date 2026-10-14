@@ -32,11 +32,13 @@ jobs:
           mkdir -p ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          # Public key only: useful when authorizing a replacement server.
+          echo "::notice title=Deploy SSH public key::$(ssh-keygen -y -f ~/.ssh/deploy_key)"
           echo "tbd.firej.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHER3/rt7Op6zGK2Qtf4rMbxQFRYZJoGi/QhPkz6pzM6" > ~/.ssh/known_hosts
 
       - name: Deploy to server
         run: |
-          rsync -avz --delete -e "ssh -i ~/.ssh/deploy_key" \
+          rsync -avz --delete -e "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/deploy_key" \
             --exclude='.git' \
             --exclude='bin' \
             --exclude='*.db' \
@@ -48,7 +50,7 @@ jobs:
             --exclude='.claude' \
             . firej@tbd.firej.org:/opt/tobedone/
 
-          ssh -i ~/.ssh/deploy_key firej@tbd.firej.org '
+          ssh -o BatchMode=yes -o IdentitiesOnly=yes -i ~/.ssh/deploy_key firej@tbd.firej.org '
             cd /opt/tobedone && \
             sudo docker compose -f docker-compose.prod.yml up -d --build --wait --wait-timeout 180 app
           '
