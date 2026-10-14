@@ -98,15 +98,12 @@ docker: ## Собрать образ
 	@$(CONTAINER_ENGINE) build -t $(IMAGE_NAME):$(IMAGE_TAG) .
 
 # ── Деплой (по образцу finforme) ──────────────────────────────
-DEPLOY_HOST=firej@firej.org
+DEPLOY_HOST=firej@tbd.firej.org
 DEPLOY_PATH=/opt/tobedone
 
-deploy: ## Задеплоить на сервер firej@firej.org
+deploy: ## Задеплоить на сервер firej@tbd.firej.org
 	@echo "$(GREEN)Синхронизация исходников...$(NC)"
 	@rsync -avz --exclude='.git' --exclude='bin' --exclude='design-preview-tbd.firej.org' \
-	             --exclude='*.db' --exclude='.idea' --exclude='.vscode' . $(DEPLOY_HOST):$(DEPLOY_PATH)/
-	@echo "$(GREEN)Сборка образа на сервере...$(NC)"
-	@ssh $(DEPLOY_HOST) 'cd $(DEPLOY_PATH) && docker build -t tobedone:latest .'
-	@echo "$(GREEN)Перезапуск контейнера...$(NC)"
-	@ssh $(DEPLOY_HOST) 'cd /opt/traefik && docker compose up -d --force-recreate tobedone'
+	             --exclude='.env*' --exclude='.claude' --exclude='*.db' --exclude='.idea' --exclude='.vscode' . $(DEPLOY_HOST):$(DEPLOY_PATH)/
+	@ssh $(DEPLOY_HOST) 'cd $(DEPLOY_PATH) && sudo docker compose -f docker-compose.prod.yml up -d --build --wait --wait-timeout 180 app'
 	@echo "$(GREEN)✓ Деплой завершён$(NC)"

@@ -1,9 +1,4 @@
-# Прод-конфиг — рассчитан на единый /opt/traefik/docker-compose.yml на сервере,
-# где уже крутится MariaDB-контейнер и Traefik. Здесь — только наш сервис.
-#
-# Для деплоя используется make deploy: rsync + docker build + docker compose up
-# в /opt/traefik. Этот файл — для справки и для запуска через docker-compose,
-# если кто-то захочет поднять стек tbd-firej-org отдельно.
+name: tobedone
 
 services:
   app:
@@ -11,33 +6,57 @@ services:
     image: tobedone:latest
     environment:
       - PORT=8080
-      - DATABASE_DSN=${DATABASE_DSN}
-      - SESSION_SECRET=${SESSION_SECRET}
+      - DATABASE_DSN=tobedone:${DB_PASSWORD:?Set DB_PASSWORD}@tcp(mariadb:3306)/tobedone?parseTime=true&charset=utf8mb4&loc=UTC
+      - SESSION_SECRET=${SESSION_SECRET:?Set SESSION_SECRET}
       - SECURE_COOKIE=true
     restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    networks:
+      - default
+      - proxy
     labels:
+      - "traefik.docker.network=traefik_default"
       - "traefik.enable=true"
       - "traefik.http.routers.tobedone.rule=Host(`tbd.firej.org`)"
       - "traefik.http.routers.tobedone.entrypoints=websecure"
       - "traefik.http.routers.tobedone.tls.certresolver=letsencrypt"
       - "traefik.http.services.tobedone.loadbalancer.server.port=8080"
 
+  mariadb:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: tobedone
+      MARIADB_USER: tobedone
+      MARIADB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   # Telegram-бот: без traefik-лейблов — входящего трафика нет.
   # В app при этом нужно прокинуть TELEGRAM_BOT_USERNAME (для deep-link кнопки).
   bot:
+    profiles: [bot]
     build:
       context: .
       dockerfile: Dockerfile.bot
     image: tobedone-bot:latest
     environment:
-      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN:-}
       - MCP_URL=http://app:8080/mcp
       - EXCHANGE_URL=http://app:8080/api/telegram/exchange
       - BOT_DB=/data/bot.sqlite
-      - LLM_BASE_URL=${LLM_BASE_URL}
-      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-deepseek-chat}
-      - OWNER_CHAT_ID=${OWNER_CHAT_ID}
+      - OWNER_CHAT_ID=${OWNER_CHAT_ID:-}
     volumes:
       - bot_data:/data
     depends_on:
@@ -46,3 +65,9 @@ services:
 
 volumes:
   bot_data:
+  mariadb_data:
+
+networks:
+  proxy:
+    external: true
+    name: traefik_default

@@ -9,3 +9,7 @@ bin
 .DS_Store
 design-preview-tbd.firej.org
 README.md
+
+.env
+.env.*
+.claude/

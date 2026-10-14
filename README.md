@@ -178,28 +178,33 @@ ENV бота (локально — `.env.bot`, `make run-bot`):
 
 ## Деплой
 
-По образцу finforme:
+Push в `main` запускает GitHub Actions: исходники отправляются на
+`firej@tbd.firej.org:/opt/tobedone`, затем Compose собирает и запускает сайт
+и проверяет HTTPS. Ручной запуск: `make deploy` или workflow_dispatch в Actions.
+Workflow использует существующий GitHub secret `SSH_PRIVATE_KEY`; соответствующий
+публичный ключ должен быть в `~firej/.ssh/authorized_keys` сервера.
 
-```bash
-make deploy
+Продакшен-стек управляется файлом `docker-compose.prod.yml` в этом репозитории.
+MariaDB хранит данные в постоянном томе `tobedone_mariadb_data`, порт БД наружу
+не публикуется. Сайт подключается к существующему Traefik через сеть
+`traefik_default`; Traefik выпускает сертификат Let's Encrypt.
+
+Перед первым запуском создать `/opt/tobedone` с владельцем `firej` и `.env`
+с правами 600 (для каждого значения использовать отдельный `openssl rand -hex 32`):
+
+```dotenv
+DB_PASSWORD=<случайный пароль БД>
+DB_ROOT_PASSWORD=<случайный пароль root БД>
+SESSION_SECRET=<случайный ключ сессий>
 ```
 
-Сделает `rsync` исходников на `firej@firej.org:/opt/tobedone`, соберёт там образ `tobedone:latest` и перезапустит сервис из `/opt/traefik/docker-compose.yml`.
+Секреты не синхронизируются и не входят в Docker-контекст. Пользователю `firej`
+нужен доступ к `sudo docker compose` без пароля. SSH host key нового сервера
+закреплён в workflow; при следующей замене сервера его нужно обновить.
+Не выполнять `docker compose down -v`: это удалит данные БД.
 
-Перед первым деплоем нужно:
-1. На проде в `/opt/traefik/docker-compose.yml` добавить сервис `tobedone` (см. `docker-compose.prod.yml` — там готовый сниппет с Traefik-лейблами на `tbd.firej.org`).
-2. Завести БД и пользователя в существующем mariadb-контейнере:
-   ```sql
-   CREATE DATABASE tobedone CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-   CREATE USER 'tobedone'@'%' IDENTIFIED BY '<пароль>';
-   GRANT ALL ON tobedone.* TO 'tobedone'@'%';
-   FLUSH PRIVILEGES;
-   ```
-3. Прописать на сервере в `.env` рядом с `/opt/traefik/docker-compose.yml`:
-   ```
-   DATABASE_DSN=tobedone:<пароль>@tcp(mariadb:3306)/tobedone?parseTime=true&charset=utf8mb4
-   SESSION_SECRET=<openssl rand -hex 32>
-   ```
+Telegram-бот запускается отдельно с `--profile bot` после настройки его переменных
+окружения; обычный деплой сайта бота не запускает.
 
 ## Дизайн-референс
 
