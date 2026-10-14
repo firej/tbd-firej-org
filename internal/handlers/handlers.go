@@ -80,10 +80,11 @@ func (h *Handler) userID(r *http.Request) (int64, bool) {
 }
 
 func (h *Handler) setUserID(w http.ResponseWriter, r *http.Request, id int64) error {
-	sess, err := h.store.Get(r, "tbd-session")
-	if err != nil {
-		return err
-	}
+	// Credentials have already been verified. Start a fresh session so a cookie
+	// signed by an old server key cannot prevent login or registration.
+	sess := sessions.NewSession(h.store, "tbd-session")
+	options := *h.store.Options
+	sess.Options = &options
 	sess.Values["user_id"] = id
 	return sess.Save(r, w)
 }
